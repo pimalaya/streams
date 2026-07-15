@@ -6,9 +6,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-07-15
+
 ### Changed
 
 - Aligned logging with the Pimalaya guidelines: connect and upgrade lifecycle points now log a short debug phrase followed by trace lines carrying the data (host, port, path), instead of single data-inlined traces.
+
+### Removed
+
+- Removed the unused serde dependency, along with the serde feature of secrecy, lightening the dependency tree.
 
 ## [0.0.1] - 2026-06-03
 
@@ -42,5 +48,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
   Forwarded to `native-tls/vendored` so consumers can compile the underlying TLS dependencies in vendored mode.
 
-[unreleased]: https://github.com/pimalaya/stream/compare/v0.0.1..HEAD
-[0.0.1]: https://github.com/pimalaya/himalaya/compare/root...v0.0.1
+[unreleased]: https://github.com/pimalaya/stream/compare/v0.1.0..HEAD
+[0.1.0]: https://github.com/pimalaya/stream/compare/v0.0.1..v0.1.0
+[0.0.1]: https://github.com/pimalaya/stream/compare/root...v0.0.1

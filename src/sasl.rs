@@ -11,22 +11,34 @@ use secrecy::SecretString;
 /// Tag identifying a SASL mechanism without its credentials.
 #[derive(Clone, Debug)]
 pub enum SaslMechanism {
+    /// The ANONYMOUS mechanism (RFC 4505).
     Anonymous,
+    /// The legacy LOGIN mechanism.
     Login,
+    /// The PLAIN mechanism (RFC 4616).
     Plain,
+    /// The OAUTHBEARER mechanism (RFC 7628).
     OAuthBearer,
+    /// The pre-standard Google XOAUTH2 mechanism.
     XOAuth2,
+    /// The SCRAM-SHA-256 mechanism (RFC 7677).
     ScramSha256,
 }
 
 /// SASL credentials for a single authentication mechanism.
 #[derive(Clone, Debug)]
 pub enum Sasl {
+    /// ANONYMOUS credentials.
     Anonymous(SaslAnonymous),
+    /// LOGIN credentials.
     Login(SaslLogin),
+    /// PLAIN credentials.
     Plain(SaslPlain),
+    /// OAUTHBEARER credentials.
     Oauthbearer(SaslOauthbearer),
+    /// XOAUTH2 credentials.
     Xoauth2(SaslXoauth2),
+    /// SCRAM-SHA-256 credentials.
     ScramSha256(SaslScramSha256),
 }
 
@@ -74,6 +86,7 @@ impl From<SaslScramSha256> for Sasl {
 /// [RFC 4505]: https://www.rfc-editor.org/rfc/rfc4505
 #[derive(Clone, Debug)]
 pub struct SaslAnonymous {
+    /// The optional trace token logged by the server.
     pub message: Option<String>,
 }
 
@@ -86,7 +99,9 @@ pub struct SaslAnonymous {
 /// [RFC 3501 §6.2.3]: https://www.rfc-editor.org/rfc/rfc3501#section-6.2.3
 #[derive(Clone, Debug)]
 pub struct SaslLogin {
+    /// The login username.
     pub username: String,
+    /// The login password.
     pub password: SecretString,
 }
 
@@ -98,8 +113,11 @@ pub struct SaslLogin {
 /// [RFC 4616]: https://www.rfc-editor.org/rfc/rfc4616
 #[derive(Clone, Debug)]
 pub struct SaslPlain {
+    /// The optional authorization identity.
     pub authzid: Option<String>,
+    /// The authentication identity.
     pub authcid: String,
+    /// The password.
     pub passwd: SecretString,
 }
 
@@ -111,9 +129,13 @@ pub struct SaslPlain {
 /// [RFC 7628]: https://www.rfc-editor.org/rfc/rfc7628
 #[derive(Clone, Debug)]
 pub struct SaslOauthbearer {
+    /// The account username.
     pub username: String,
+    /// The server host, sent verbatim in the GS2 header.
     pub host: String,
+    /// The server port, sent verbatim in the GS2 header.
     pub port: u16,
+    /// The OAuth 2.0 access token.
     pub token: SecretString,
 }
 
@@ -125,7 +147,9 @@ pub struct SaslOauthbearer {
 /// [Google XOAUTH2]: https://developers.google.com/gmail/imap/xoauth2-protocol
 #[derive(Clone, Debug)]
 pub struct SaslXoauth2 {
+    /// The account username.
     pub username: String,
+    /// The OAuth 2.0 access token.
     pub token: SecretString,
 }
 
@@ -137,6 +161,8 @@ pub struct SaslXoauth2 {
 /// [RFC 5802]: https://www.rfc-editor.org/rfc/rfc5802
 #[derive(Clone, Debug)]
 pub struct SaslScramSha256 {
+    /// The account username.
     pub username: String,
+    /// The password, never sent on the wire.
     pub password: SecretString,
 }

@@ -15,7 +15,7 @@ use std::{
 };
 
 use anyhow::{Result, bail};
-use log::trace;
+use log::{debug, trace};
 #[cfg(windows)]
 use uds_windows::UnixStream;
 
@@ -42,24 +42,38 @@ pub struct StreamStd {
 impl StreamStd {
     /// Opens a Unix-domain socket at `path`.
     pub fn connect_unix<P: AsRef<Path>>(path: P) -> Result<StreamStd> {
-        trace!("connecting Unix stream to {}", path.as_ref().display());
+        debug!("connect unix stream");
+        trace!("path: {}", path.as_ref().display());
+
         let inner = Stream::Unix(UnixStream::connect(path)?);
         let host = String::from("127.0.0.1");
+
+        debug!("unix stream connected");
         Ok(Self { inner, host })
     }
 
     /// Opens a plain TCP connection to `host:port`.
     pub fn connect_tcp(host: impl ToString, port: u16) -> Result<StreamStd> {
         let host = host.to_string();
-        trace!("connecting TCP stream to {host}:{port}");
+
+        debug!("connect tcp stream");
+        trace!("host: {host}");
+        trace!("port: {port}");
+
         let inner = Stream::Tcp(TcpStream::connect((host.as_str(), port))?);
+
+        debug!("tcp stream connected");
         Ok(Self { inner, host })
     }
 
     /// Opens a TCP connection and runs the TLS handshake (implicit TLS).
     pub fn connect_tls(host: impl ToString, port: u16, tls: &Tls) -> Result<StreamStd> {
         let host = host.to_string();
-        trace!("connecting TLS stream to {host}:{port}");
+
+        debug!("connect tls stream");
+        trace!("host: {host}");
+        trace!("port: {port}");
+
         let tcp = TcpStream::connect((host.as_str(), port))?;
         Self::_upgrade_tls(host, tcp, tls)
     }
@@ -70,7 +84,8 @@ impl StreamStd {
     pub fn upgrade_tls(self, tls: &Tls) -> Result<StreamStd> {
         match self.inner {
             Stream::Tcp(tcp) => {
-                trace!("upgrading TCP stream to TLS for {}", self.host);
+                debug!("upgrade tcp stream to tls");
+                trace!("host: {}", self.host);
                 Self::_upgrade_tls(self.host, tcp, tls)
             }
             Stream::Unix(_) => bail!("cannot upgrade Unix-domain stream to TLS"),
@@ -183,6 +198,8 @@ impl StreamStd {
                 let server_name = host.to_string().try_into()?;
                 let conn = ClientConnection::new(Arc::new(config), server_name)?;
                 let inner = Stream::Rustls(StreamOwned::new(conn, tcp));
+
+                debug!("tls stream connected");
                 Ok(StreamStd { inner, host })
             }
 
@@ -205,10 +222,13 @@ impl StreamStd {
 
                 let connector = builder.build()?;
                 let inner = Stream::NativeTls(connector.connect(host.as_str(), tcp)?);
+
+                debug!("tls stream connected");
                 Ok(StreamStd { inner, host })
             }
 
-            // SAFETY: case already handled
+            // NOTE: every provider is matched above; the pattern only
+            // remains reachable on partial feature sets.
             #[allow(unreachable_patterns)]
             _ => unreachable!(),
         }
@@ -252,7 +272,10 @@ impl Write for StreamStd {
     }
 }
 
+/// Socket-level tuning shared by every variant.
 impl StreamStd {
+    /// Sets the read timeout on the underlying socket; `None` blocks
+    /// forever.
     pub fn set_read_timeout(&self, timeout: Option<Duration>) -> io::Result<()> {
         match &self.inner {
             Stream::Tcp(s) => s.set_read_timeout(timeout),

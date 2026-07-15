@@ -1,35 +1,24 @@
 # Contributing guide
 
-Thank you for investing your time in contributing to the Pimalaya stream project.
+Thank you for investing your time in contributing to pimalaya-stream.
 
-## Development
+Whether you are a human or an AI agent, read these in order before touching the code:
 
-The development environment is managed by [Nix](https://nixos.org/download.html).
-Running `nix-shell` will spawn a shell with everything you need to get started with the lib.
+1. the [Pimalaya README](https://github.com/pimalaya) for what the project is and how its repositories stack;
+2. the [Pimalaya CONTRIBUTING](https://github.com/pimalaya/.github/blob/master/CONTRIBUTING.md) guide, which chains to the shared architecture and guidelines;
+3. the inline header documentation, starting with src/lib.rs: it is the architecture document of this crate;
+4. this guide, for what differs from the Pimalaya standards.
 
-If you do not want to use Nix, you can either use [rustup](https://rust-lang.github.io/rustup/index.html):
+Everything below documents only the differences.
 
+## Deliberately std
+
+pimalaya-stream wraps TLS providers and sockets and exposes no I/O-free coroutines, so the no_std layer checks of the org guide do not apply: there is no coroutine core to keep std-free. The layers to build against are the feature-gated transport and TLS providers:
+
+```sh
+cargo build --no-default-features                          # sasl + tls configs only
+cargo build --no-default-features --features std           # + blocking transport, no TLS
+cargo build                                                # rustls-ring (default)
+cargo build --no-default-features --features rustls-aws
+cargo build --no-default-features --features native-tls
 ```
-rustup update
-```
-
-or install manually the following dependencies:
-
-- [cargo](https://doc.rust-lang.org/cargo/)
-- [rustc](https://doc.rust-lang.org/stable/rustc/platform-support.html) (`>= 1.87`)
-
-## Build
-
-```
-cargo build
-```
-
-## Test
-
-```
-cargo test
-```
-
-## Commit style
-
-Pimalaya stream follows the [conventional commits specification](https://www.conventionalcommits.org/en/v1.0.0/#summary).

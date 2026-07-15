@@ -21,11 +21,9 @@ pub struct Tls {
     /// TLS backend selector. `None` falls back to the first enabled feature
     /// in this order: `rustls-ring`, `rustls-aws`, `native-tls`.
     pub provider: Option<TlsProvider>,
-
     /// Rustls-specific options. Ignored when the resolved provider is
     /// [`TlsProvider::NativeTls`].
     pub rustls: Rustls,
-
     /// Optional extra trust anchor, as a path to a PEM file.
     pub cert: Option<PathBuf>,
 }
@@ -33,7 +31,9 @@ pub struct Tls {
 /// TLS backend selector.
 #[derive(Clone, Debug)]
 pub enum TlsProvider {
+    /// The rustls backend.
     Rustls,
+    /// The platform-backed native-tls backend.
     NativeTls,
 }
 
@@ -43,7 +43,6 @@ pub struct Rustls {
     /// Crypto provider. `None` falls back to `ring` if enabled, otherwise
     /// `aws-lc-rs`.
     pub crypto: Option<RustlsCrypto>,
-
     /// ALPN protocol identifiers offered during the handshake (e.g.
     /// `vec!["imap".into()]`). An empty vec skips ALPN negotiation. Ignored
     /// by `native-tls`.
@@ -53,6 +52,8 @@ pub struct Rustls {
 /// Rustls crypto provider selector.
 #[derive(Clone, Debug)]
 pub enum RustlsCrypto {
+    /// The aws-lc-rs crypto provider.
     Aws,
+    /// The ring crypto provider.
     Ring,
 }

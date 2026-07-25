@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-07-25
+
+### Fixed
+
+- Fixed the `tls.cert` option being unusable for self-signed servers (Proton Bridge, self-hosted). Under rustls a configured certificate is now pinned to the server's leaf, instead of being registered as a CA trust anchor that rejected the self-signed leaf with `CaUsedAsEndEntity`. A server presenting a different leaf still falls back to using the certificate as an extra trust anchor.
+
 ## [0.1.0] - 2026-07-15
 
 ### Changed

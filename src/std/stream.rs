@@ -19,7 +19,10 @@ use log::{debug, trace};
 #[cfg(windows)]
 use uds_windows::UnixStream;
 
-use crate::tls::Tls;
+use crate::{
+    std::proxy::{Proxy, dial},
+    tls::Tls,
+};
 
 #[derive(Debug)]
 enum Stream {
@@ -53,6 +56,9 @@ impl StreamStd {
     }
 
     /// Opens a plain TCP connection to `host:port`.
+    ///
+    /// Routed through the ambient proxy ([`Proxy::System`]); use
+    /// [`StreamStd::builder`] to select a proxy explicitly.
     pub fn connect_tcp(host: impl ToString, port: u16) -> Result<StreamStd> {
         let host = host.to_string();
 
@@ -60,13 +66,13 @@ impl StreamStd {
         trace!("host: {host}");
         trace!("port: {port}");
 
-        let inner = Stream::Tcp(TcpStream::connect((host.as_str(), port))?);
-
-        debug!("tcp stream connected");
-        Ok(Self { inner, host })
+        Self::open(host, port, None, &Proxy::System)
     }
 
     /// Opens a TCP connection and runs the TLS handshake (implicit TLS).
+    ///
+    /// Routed through the ambient proxy ([`Proxy::System`]); use
+    /// [`StreamStd::builder`] to select a proxy explicitly.
     pub fn connect_tls(host: impl ToString, port: u16, tls: &Tls) -> Result<StreamStd> {
         let host = host.to_string();
 
@@ -74,8 +80,42 @@ impl StreamStd {
         trace!("host: {host}");
         trace!("port: {port}");
 
-        let tcp = TcpStream::connect((host.as_str(), port))?;
-        Self::_upgrade_tls(host, tcp, tls)
+        Self::open(host, port, Some(tls), &Proxy::System)
+    }
+
+    /// Starts building a TCP connection to `host:port`, optionally wrapped
+    /// in implicit TLS and/or routed through a chosen proxy. Terminates
+    /// with [`StreamBuilder::connect`].
+    ///
+    /// The plain constructors ([`connect_tcp`](Self::connect_tcp),
+    /// [`connect_tls`](Self::connect_tls)) are shorthands for this with the
+    /// default [`Proxy::System`]; reach for the builder when a call site
+    /// needs to override the proxy from its own configuration.
+    pub fn builder(host: impl ToString, port: u16) -> StreamBuilder {
+        StreamBuilder {
+            host: host.to_string(),
+            port,
+            tls: None,
+            proxy: Proxy::System,
+        }
+    }
+
+    /// Dials `host:port` through `proxy`, optionally upgrading to implicit
+    /// TLS. The single connect path shared by the constructors and the
+    /// builder.
+    fn open(host: String, port: u16, tls: Option<&Tls>, proxy: &Proxy) -> Result<StreamStd> {
+        let tcp = dial(&host, port, proxy)?;
+
+        match tls {
+            Some(tls) => Self::_upgrade_tls(host, tcp, tls),
+            None => {
+                debug!("tcp stream connected");
+                Ok(Self {
+                    inner: Stream::Tcp(tcp),
+                    host,
+                })
+            }
+        }
     }
 
     /// Wraps a plain TCP stream in a TLS session (STARTTLS upgrade).
@@ -248,6 +288,44 @@ impl StreamStd {
     }
 }
 
+/// Builder for [`StreamStd`]: the proxy-aware connect entry point.
+///
+/// Created by [`StreamStd::builder`]. Set implicit TLS with [`tls`](Self::tls)
+/// and/or a proxy with [`proxy`](Self::proxy), then open the connection with
+/// the terminal [`connect`](Self::connect).
+#[derive(Debug)]
+pub struct StreamBuilder {
+    host: String,
+    port: u16,
+    tls: Option<Tls>,
+    proxy: Proxy,
+}
+
+impl StreamBuilder {
+    /// Runs an implicit-TLS handshake once connected (omit for plaintext
+    /// or a later STARTTLS [`upgrade_tls`](StreamStd::upgrade_tls)).
+    pub fn tls(mut self, tls: Tls) -> Self {
+        self.tls = Some(tls);
+        self
+    }
+
+    /// Selects the proxy. Defaults to [`Proxy::System`] (resolved from the
+    /// environment at connect time).
+    pub fn proxy(mut self, proxy: Proxy) -> Self {
+        self.proxy = proxy;
+        self
+    }
+
+    /// Opens the connection (blocking). Terminal.
+    pub fn connect(self) -> Result<StreamStd> {
+        debug!("connect stream");
+        trace!("host: {}", self.host);
+        trace!("port: {}", self.port);
+
+        StreamStd::open(self.host, self.port, self.tls.as_ref(), &self.proxy)
+    }
+}
+
 impl Read for StreamStd {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         match &mut self.inner {
@@ -297,6 +375,21 @@ impl StreamStd {
             Stream::Rustls(s) => s.sock.set_read_timeout(timeout),
             #[cfg(feature = "native-tls")]
             Stream::NativeTls(s) => s.get_ref().set_read_timeout(timeout),
+        }
+    }
+
+    /// Toggles non-blocking mode on the underlying socket. Under a TLS
+    /// variant it applies to the socket beneath the session, so reads and
+    /// writes surface `WouldBlock` reliably (unlike a read timeout, which
+    /// the TLS layer does not always propagate).
+    pub fn set_nonblocking(&self, nonblocking: bool) -> io::Result<()> {
+        match &self.inner {
+            Stream::Tcp(s) => s.set_nonblocking(nonblocking),
+            Stream::Unix(s) => s.set_nonblocking(nonblocking),
+            #[cfg(any(feature = "rustls-aws", feature = "rustls-ring"))]
+            Stream::Rustls(s) => s.sock.set_nonblocking(nonblocking),
+            #[cfg(feature = "native-tls")]
+            Stream::NativeTls(s) => s.get_ref().set_nonblocking(nonblocking),
         }
     }
 }

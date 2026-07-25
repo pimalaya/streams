@@ -7,11 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.2] - 2026-07-26
+
+### Added
+
+- Added the `Proxy` selector and blocking `dial` under the `std::proxy` module (`std` feature), letting every `StreamStd` connect tunnel through a proxy.
+
+  Variants: `None` (direct), `Socks5` and `Http` (`CONNECT`) with optional username/password auth, and the default `System`, which resolves `all_proxy`/`https_proxy` from the environment at dial time, honouring `no_proxy` and always bypassing loopback. `Proxy::from_url` parses `socks5://`, `socks5h://`, `socks://`, `http://` and `https://` URLs. The handshakes run on the I/O-free `io-proxy` coroutines.
+
 ## [0.1.1] - 2026-07-25
 
 ### Fixed
 
-- Fixed the `tls.cert` option being unusable for self-signed servers (Proton Bridge, self-hosted). Under rustls a configured certificate is now pinned to the server's leaf, instead of being registered as a CA trust anchor that rejected the self-signed leaf with `CaUsedAsEndEntity`. A server presenting a different leaf still falls back to using the certificate as an extra trust anchor.
+- Fixed the `tls.cert` option being unusable for self-signed servers (Proton Bridge, self-hosted).
+
+  Under rustls a configured certificate is now pinned to the server's leaf, instead of being registered as a CA trust anchor that rejected the self-signed leaf with `CaUsedAsEndEntity`. A server presenting a different leaf still falls back to using the certificate as an extra trust anchor.
 
 ## [0.1.0] - 2026-07-15
 
@@ -55,6 +65,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
   Forwarded to `native-tls/vendored` so consumers can compile the underlying TLS dependencies in vendored mode.
 
-[unreleased]: https://github.com/pimalaya/stream/compare/v0.1.0..HEAD
+[unreleased]: https://github.com/pimalaya/stream/compare/v0.1.2..HEAD
+[0.1.2]: https://github.com/pimalaya/stream/compare/v0.1.1..v0.1.2
+[0.1.1]: https://github.com/pimalaya/stream/compare/v0.1.0..v0.1.1
 [0.1.0]: https://github.com/pimalaya/stream/compare/v0.0.1..v0.1.0
 [0.0.1]: https://github.com/pimalaya/stream/compare/root...v0.0.1

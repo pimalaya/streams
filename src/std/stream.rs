@@ -2,7 +2,7 @@
 //!
 //! [`StreamStd`] is a single `Read + Write` type wrapping a TCP socket, a
 //! Unix-domain socket or a TLS session (`rustls` or `native-tls`). TLS
-//! options (provider, crypto, ALPN, extra trust anchor) come from
+//! options (provider, crypto, ALPN, a pinned certificate) come from
 //! [`Tls`](crate::tls::Tls).
 
 #[cfg(unix)]
@@ -176,8 +176,21 @@ impl StreamStd {
                     let Some(cert) = CertificateDer::pem_slice_iter(&pem).next() else {
                         bail!("empty TLS cert at {}", pem_path.display())
                     };
+                    let cert = cert?;
 
-                    let verifier = Verifier::new_with_extra_roots(vec![cert?], crypto_provider)?;
+                    // NOTE: pin the leaf; a self-signed CA-marked leaf
+                    // (Proton Bridge) fails a normal chain build with
+                    // CaUsedAsEndEntity.
+                    let fallback = Verifier::new_with_extra_roots(
+                        vec![cert.clone()],
+                        crypto_provider.clone(),
+                    )?;
+
+                    let verifier = pinned::PinnedServerCertVerifier::new(
+                        cert,
+                        Arc::new(fallback),
+                        crypto_provider,
+                    );
 
                     ClientConfig::builder()
                         .dangerous()
@@ -284,6 +297,112 @@ impl StreamStd {
             Stream::Rustls(s) => s.sock.set_read_timeout(timeout),
             #[cfg(feature = "native-tls")]
             Stream::NativeTls(s) => s.get_ref().set_read_timeout(timeout),
+        }
+    }
+}
+
+/// Certificate pinning for the rustls TLS branch.
+#[cfg(any(feature = "rustls-aws", feature = "rustls-ring"))]
+mod pinned {
+    use std::sync::Arc;
+
+    use rustls::{
+        DigitallySignedStruct, Error, SignatureScheme,
+        client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier},
+        crypto::{CryptoProvider, verify_tls12_signature, verify_tls13_signature},
+        pki_types::{CertificateDer, ServerName, UnixTime},
+    };
+    use rustls_platform_verifier::Verifier;
+
+    /// A rustls verifier that pins one server certificate.
+    ///
+    /// The pin is trusted when the server presents it verbatim as its leaf,
+    /// the model self-signed servers need (e.g. Proton Bridge): such a
+    /// certificate is often a CA, which a normal chain build rejects in the
+    /// leaf position (`CaUsedAsEndEntity`).
+    ///
+    /// A different leaf falls back to the pin as an extra trust anchor;
+    /// handshake signatures are always verified through the active crypto
+    /// provider.
+    #[derive(Debug)]
+    pub struct PinnedServerCertVerifier {
+        pinned: CertificateDer<'static>,
+        fallback: Arc<Verifier>,
+        provider: Arc<CryptoProvider>,
+    }
+
+    impl PinnedServerCertVerifier {
+        /// Builds a pinning verifier for `pinned`.
+        ///
+        /// Handshake signatures are verified through `provider`; `fallback`
+        /// handles a server presenting a different leaf.
+        pub fn new(
+            pinned: CertificateDer<'static>,
+            fallback: Arc<Verifier>,
+            provider: Arc<CryptoProvider>,
+        ) -> Self {
+            Self {
+                pinned,
+                fallback,
+                provider,
+            }
+        }
+    }
+
+    impl ServerCertVerifier for PinnedServerCertVerifier {
+        fn verify_server_cert(
+            &self,
+            end_entity: &CertificateDer<'_>,
+            intermediates: &[CertificateDer<'_>],
+            server_name: &ServerName<'_>,
+            ocsp_response: &[u8],
+            now: UnixTime,
+        ) -> Result<ServerCertVerified, Error> {
+            if end_entity.as_ref() == self.pinned.as_ref() {
+                return Ok(ServerCertVerified::assertion());
+            }
+
+            self.fallback.verify_server_cert(
+                end_entity,
+                intermediates,
+                server_name,
+                ocsp_response,
+                now,
+            )
+        }
+
+        fn verify_tls12_signature(
+            &self,
+            message: &[u8],
+            cert: &CertificateDer<'_>,
+            dss: &DigitallySignedStruct,
+        ) -> Result<HandshakeSignatureValid, Error> {
+            verify_tls12_signature(
+                message,
+                cert,
+                dss,
+                &self.provider.signature_verification_algorithms,
+            )
+        }
+
+        fn verify_tls13_signature(
+            &self,
+            message: &[u8],
+            cert: &CertificateDer<'_>,
+            dss: &DigitallySignedStruct,
+        ) -> Result<HandshakeSignatureValid, Error> {
+            verify_tls13_signature(
+                message,
+                cert,
+                dss,
+                &self.provider.signature_verification_algorithms,
+            )
+        }
+
+        fn supported_verify_schemes(&self) -> Vec<SignatureScheme> {
+            self.provider
+                .signature_verification_algorithms
+                .supported_schemes()
         }
     }
 }

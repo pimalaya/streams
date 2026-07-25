@@ -24,7 +24,11 @@ pub struct Tls {
     /// Rustls-specific options. Ignored when the resolved provider is
     /// [`TlsProvider::NativeTls`].
     pub rustls: Rustls,
-    /// Optional extra trust anchor, as a path to a PEM file.
+    /// Optional certificate to trust, as a path to a PEM file.
+    ///
+    /// Under rustls it is pinned to the server's leaf (e.g. Proton Bridge),
+    /// else used as an extra trust anchor; under native-tls, a root
+    /// certificate.
     pub cert: Option<PathBuf>,
 }
 

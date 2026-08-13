@@ -1,65 +1,50 @@
 # Stream [![Documentation](https://img.shields.io/docsrs/pimalaya-stream?style=flat&logo=docs.rs&logoColor=white)](https://docs.rs/pimalaya-stream/latest/pimalaya_stream) [![Matrix](https://img.shields.io/badge/chat-%23pimalaya-blue?style=flat&logo=matrix&logoColor=white)](https://matrix.to/#/#pimalaya:matrix.org) [![Mastodon](https://img.shields.io/badge/news-%40pimalaya-blue?style=flat&logo=mastodon&logoColor=white)](https://fosstodon.org/@pimalaya)
 
-Stream, TLS and SASL utils for Pimalaya
+Blocking stream and TLS utils for the Pimalaya io- protocol crates and their consumers
 
-> [!WARNING]
-> This crate is published for internal Pimalaya usage. Its API is intentionally minimal, follows the needs of the io- protocol crates and may change without notice. It is not intended as a general-purpose stream/TLS/SASL library.
+This crate opens and upgrades the blocking streams the io- protocol clients run on: TCP connections, TLS connections, Unix-domain sockets, proxy resolution and the plain-to-TLS upgrade STARTTLS flows need. It is public, and meant for anyone building a client on io-imap, io-smtp, io-http or a sibling, not only for Pimalaya's own products. Reusing it is the supported path, reimplementing TCP, TLS, proxy resolution and the STARTTLS upgrade is not.
+
+> [!NOTE]
+> The crate stays on 0.x, which means breaking changes land in minor bumps and never in patch bumps. Pin a minor version and read the [changelog](./CHANGELOG.md) before upgrading.
 
 ## Table of contents
 
 - [Features](#features)
 - [Usage](#usage)
-- [AI disclosure](#ai-disclosure)
+- [AI policy](https://github.com/pimalaya/.github/blob/master/AI_POLICY.md)
 - [License](#license)
 - [Social](#social)
-- [Contributing](#contributing)
+- [Contributing](./CONTRIBUTING.md)
 - [Sponsoring](#sponsoring)
 
 ## Features
 
 - **Blocking stream**: one handle wrapping a TCP socket, a Unix-domain socket or a TLS session, with the plain-to-TLS upgrade STARTTLS flows need (requires `std` feature).
+- **Proxy**: every connect can tunnel through a SOCKS5 or HTTP `CONNECT` proxy, resolved from the ambient proxy environment variables by default (requires `std` feature).
 - **TLS** support:
   - [Rustls](https://crates.io/crates/rustls) with ring crypto (requires `rustls-ring` feature, enabled by default)
   - [Rustls](https://crates.io/crates/rustls) with aws crypto (requires `rustls-aws` feature)
   - [Native TLS](https://crates.io/crates/native-tls) (requires `native-tls` feature)
-- **SASL** credentials: shared configuration for the mechanisms the protocol crates implement (ANONYMOUS, LOGIN, PLAIN, OAUTHBEARER, XOAUTH2, SCRAM-SHA-256).
 
 > [!TIP]
 > pimalaya-stream is written in [Rust](https://www.rust-lang.org/) and uses [cargo features](https://doc.rust-lang.org/cargo/reference/features.html) to gate TLS providers. The default feature set is declared in [Cargo.toml](./Cargo.toml) or on [docs.rs](https://docs.rs/crate/pimalaya-stream/latest/features).
 
 ## Usage
 
-The whole API is documented on [docs.rs](https://docs.rs/pimalaya-stream/latest/pimalaya_stream); the io- protocol crates are its real-world consumers.
-
-## AI disclosure
-
-This project is developed with AI assistance. This section documents how, so users and downstream packagers can make informed decisions.
-
-- **Tools**: Claude Code (Anthropic), invoked locally with a persistent project-scoped memory and a small set of repo-specific rules.
-- **Used for**: Refactors, mechanical multi-file edits, boilerplate (feature gates, error enums, derive macros, trait impls), test scaffolding, doc polish, exploratory design conversations.
-- **Not used for**: Engineering, critical code, git manipulation (commit, merge, rebase…), real-world tests.
-- **Verification**: Every AI-assisted change is read, compiled, tested, and formatted before commit. Behavioural correctness is verified against the relevant RFC or upstream spec, not assumed from the model output. Tests are never adjusted to fit AI-generated code; the code is adjusted to fit correct behaviour.
-- **Limitations**: AI models occasionally produce code that compiles and passes tests but is subtly wrong. The verification workflow catches most of this; it does not catch all of it. Bug reports are welcome and taken seriously.
-- **Last reviewed**: 15/07/2026
+The whole API is documented on [docs.rs](https://docs.rs/pimalaya-stream/latest/pimalaya_stream); the io- protocol crates and their std clients are its real-world consumers.
 
 ## License
 
-This project is dual-licensed under either of:
+This project is licensed under either of:
 
-- [Apache License, Version 2.0](./LICENSE-APACHE)
-- [MIT License](./LICENSE-MIT)
-
-at your option.
+- [MIT license](LICENSE-MIT)
+- [Apache License, Version 2.0](LICENSE-APACHE)
 
 ## Social
 
 - Chat on [Matrix](https://matrix.to/#/#pimalaya:matrix.org)
 - News on [Mastodon](https://fosstodon.org/@pimalaya) or [RSS](https://fosstodon.org/@pimalaya.rss)
 - Mail at [pimalaya.org@posteo.net](mailto:pimalaya.org@posteo.net)
-
-## Contributing
-
-Contributions are welcome: start with [CONTRIBUTING.md](./CONTRIBUTING.md), which opens with the Pimalaya-wide guides to read first.
 
 ## Sponsoring
 
@@ -70,7 +55,7 @@ Special thanks to the [NLnet foundation](https://nlnet.nl/) and the [European Co
 - 2022 → 2023: [NGI Assure](https://nlnet.nl/project/Himalaya/)
 - 2023 → 2024: [NGI Zero Entrust](https://nlnet.nl/project/Pimalaya/)
 - 2024 → 2026: [NGI Zero Core](https://nlnet.nl/project/Pimalaya-PIM/)
-- *2027 in preparation…*
+- 2026 → 2027: [NGI Zero Commons Fund](https://nlnet.nl/project/Pimalaya-pimdir/)
 
 If you appreciate the project, feel free to donate using one of the following providers:
 

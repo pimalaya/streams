@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Added examples for the three shapes a consumer opens a connection in: implicit TLS, a STARTTLS upgrade, and a connect through an explicitly configured proxy.
+
+### Changed
+
+- Rescoped the crate as public, dropping the internal-usage disclaimer from the README and the crate documentation.
+
+  The blocking stream, the TLS options and the proxy selector are documented for any consumer of the io- protocol crates, not only for Pimalaya's own products. The crate stays on 0.x: breaking changes land in minor bumps and never in patch bumps.
+
+### Removed
+
+- Removed the `sasl` module. **Breaking.**
+
+  `Sasl`, `SaslMechanism` and the six credential structs moved to io-sasl, which is no_std, opens nothing and pairs each credential type with the coroutine that computes its payloads. Callers import them from there, where the structs carry a `Creds` suffix (`SaslPlainCreds`, `SaslLoginCreds`, ...) and SCRAM gained the client nonce and the channel binding the mechanism needs.
+
+  This is what the extraction was for: a transport crate wrapping sockets and TLS sessions had become the home of a vocabulary that a no_std protocol core needed, so io-imap and io-smtp had to depend on it just to name a mechanism. Both now depend on it only for their std clients, and their coroutine cores are free of it.
+
 ## [0.1.2] - 2026-07-26
 
 ### Added

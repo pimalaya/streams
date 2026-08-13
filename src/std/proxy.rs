@@ -1,8 +1,8 @@
 //! Proxy configuration and blocking dialers.
 //!
 //! [`Proxy`] selects how a TCP connection reaches its target: directly,
-//! through a SOCKS5 proxy, through an HTTP `CONNECT` proxy, or — the
-//! default — resolved from the environment at dial time. Every transport
+//! through a SOCKS5 proxy, through an HTTP `CONNECT` proxy, or, the
+//! default, resolved from the environment at dial time. Every transport
 //! (IMAP, SMTP, HTTP, ...) funnels through [`dial`], so proxy support is
 //! uniform across protocols.
 //!
@@ -16,9 +16,9 @@
 //!
 //! The handshakes themselves live in the `io-proxy` crate (I/O-free
 //! coroutines for SOCKS5 and HTTP `CONNECT`); this module only owns the
-//! config concerns — resolving [`Proxy::System`] from the environment,
-//! `no_proxy` bypass, URL parsing — and drives those coroutines over the
-//! socket.
+//! config concerns: resolving [`Proxy::System`] from the environment,
+//! `no_proxy` bypass and URL parsing, and drives those coroutines over
+//! the socket.
 //!
 //! Logging follows the crate rules: debug marks the dial decision (kind,
 //! proxy endpoint, source). Credentials never reach the logs.

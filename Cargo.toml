@@ -1,13 +1,13 @@
 [package]
 name = "pimalaya-stream"
-description = "Stream, TLS and SASL utils for Pimalaya"
-version = "0.1.2"
+description = "Blocking stream and TLS utils for Pimalaya"
+version = "0.2.0"
 authors = ["soywod <pimalaya.org@posteo.net>"]
 rust-version = "1.87"
 edition = "2024"
 license = "MIT OR Apache-2.0"
 categories = ["api-bindings", "network-programming"]
-keywords = ["pimalaya", "stream", "tls", "sasl", "tcp"]
+keywords = ["pimalaya", "stream", "tls", "tcp", "proxy"]
 homepage = "https://pimalaya.org"
 documentation = "https://docs.rs/pimalaya-stream/latest/pimalaya_stream"
 repository = "https://github.com/pimalaya/stream"
@@ -23,6 +23,24 @@ native-tls = ["std", "dep:native-tls"]
 rustls-aws = ["std", "dep:rustls", "dep:rustls-platform-verifier", "rustls/aws-lc-rs"]
 rustls-ring = ["std", "dep:rustls", "dep:rustls-platform-verifier", "rustls/ring"]
 vendored = ["native-tls?/vendored"]
+
+[[example]]
+name = "tls"
+path = "examples/tls.rs"
+required-features = ["std"]
+
+[[example]]
+name = "starttls"
+path = "examples/starttls.rs"
+required-features = ["std"]
+
+[[example]]
+name = "proxy"
+path = "examples/proxy.rs"
+required-features = ["std"]
+
+[dev-dependencies]
+env_logger = "0.11"
 
 [dependencies]
 anyhow = { version = "1", default-features = false, features = ["std"] }

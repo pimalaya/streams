@@ -3,7 +3,9 @@
 //! [`StreamStd`] is a single `Read + Write` type wrapping a TCP socket, a
 //! Unix-domain socket or a TLS session (`rustls` or `native-tls`). TLS
 //! options (provider, crypto, ALPN, a pinned certificate) come from
-//! [`Tls`](crate::tls::Tls).
+//! [`Tls`].
+//!
+//! [`Tls`]: crate::tls::Tls
 
 #[cfg(unix)]
 use std::os::unix::net::UnixStream;

@@ -24,21 +24,21 @@
 //!
 //! ## Layout
 //!
-//! The crate is deliberately std: it wraps TLS providers and sockets
-//! and exposes no I/O-free coroutines, so the no_std conventions of
-//! the io-* family do not apply here.
+//! The crate is deliberately std and blocking: it wraps TLS providers
+//! and sockets and exposes no I/O-free coroutines, so the no_std
+//! conventions of the io-* family do not apply here. There is no async
+//! twin planned, which is why the three modules sit flat at the root
+//! rather than under a runtime one.
 //!
 //! [`tls`] holds the provider-agnostic TLS options consumed by connect
 //! and upgrade: the provider choice (Rustls with ring or aws crypto,
 //! Native TLS), ALPN identifiers and an optional extra trust anchor.
-//! The [`std`] module (`std` feature) is the blocking runtime layer. It
-//! carries the [`std::stream`] transport, one `Read + Write` handle
-//! over TCP, Unix sockets or a TLS session, with the upgrade from plain
-//! to TLS, and the [`std::proxy`] selector (SOCKS5, HTTP CONNECT, or
-//! environment-resolved) that every connect funnels through,
-//! defaulting to the ambient proxy variables. The module is
-//! deliberately named after its runtime: a future async runtime would
-//! gain a sibling module (tokio) next to it.
+//! [`stream`] (`std` feature) is the transport itself, one `Read +
+//! Write` handle over TCP, Unix sockets or a TLS session, with the
+//! upgrade from plain to TLS and the retry strategy its reads and
+//! writes honor. [`proxy`] (same feature) is the selector every connect
+//! funnels through (SOCKS5, HTTP CONNECT, or environment-resolved),
+//! defaulting to the ambient proxy variables.
 //!
 //! SASL is not here. The credential vocabulary and the mechanisms that
 //! compute payloads from it live in io-sasl, which is no_std and knows
@@ -56,5 +56,7 @@
 //! (connect, upgrade), trace carries the data.
 
 #[cfg(feature = "std")]
-pub mod std;
+pub mod proxy;
+#[cfg(feature = "std")]
+pub mod stream;
 pub mod tls;

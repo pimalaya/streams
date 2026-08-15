@@ -14,7 +14,7 @@ Two mutators went the same way for the same reason. `set_retry` became a public 
 
 `upgrade_tls` keeps its bare `&Tls`. A proxy means nothing once the socket is open, and the strategy comes from the stream being consumed, so an options struct there would have been a one-field wrapper.
 
-The names moved with the shape. `StreamStd` is now `Stream`: the runtime is what the module says, `std::stream` today and a sibling module the day an async one lands, so the type was repeating it. The private enum behind it is `StreamKind`, which is what it is, and the field holding it is `kind`. Three `impl` blocks became one, public surface first and private helpers under it, and `_upgrade_tls` now returns a `StreamKind` rather than a whole stream, so every connect ends at the same constructor.
+The names moved with the shape. `StreamStd` is now `Stream`: the module already says which transport this is, so the type was repeating it. The private enum behind it is `StreamKind`, which is what it is, and the field holding it is `kind`. Three `impl` blocks became one, public surface first and private helpers under it, and `_upgrade_tls` now returns a `StreamKind` rather than a whole stream, so every connect ends at the same constructor.
 
 That constructor stayed private and did not become public fields. `kind` cannot be public without publishing the `rustls` and `native_tls` types it wraps, which is the one thing the TLS layer of this crate promises never to do, and the constructor is also where the read deadline is armed: a connect that skipped it would promise a budget it could not keep.
 

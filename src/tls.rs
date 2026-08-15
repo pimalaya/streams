@@ -10,8 +10,8 @@
 //! ship `default_alpn()` helpers so config layers can populate
 //! `rustls.alpn` before calling `connect_tls`.
 //!
-//! [`Stream::connect_tls`]: crate::std::stream::Stream::connect_tls
-//! [`Stream::upgrade_tls`]: crate::std::stream::Stream::upgrade_tls
+//! [`Stream::connect_tls`]: crate::stream::Stream::connect_tls
+//! [`Stream::upgrade_tls`]: crate::stream::Stream::upgrade_tls
 
 use std::path::PathBuf;
 

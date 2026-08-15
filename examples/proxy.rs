@@ -13,10 +13,8 @@
 use std::{env, error::Error, io::Read};
 
 use pimalaya_stream::{
-    std::{
-        proxy::Proxy,
-        stream::{Stream, StreamTlsConnectOptions},
-    },
+    proxy::Proxy,
+    stream::{Stream, StreamTlsConnectOptions},
     tls::Tls,
 };
 

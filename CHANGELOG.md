@@ -35,9 +35,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `Stream::set_nonblocking` no longer touches the retry strategy, and takes `&self` again. A caller reaching for non-blocking mode assigns `StreamRetry::Never` beside it, the two settings being contradictory: it wants the `WouldBlock` failures a strategy would spend its whole budget hiding.
 
-- Renamed `StreamStd` to `std::stream::Stream`. **Breaking.**
+- Renamed `StreamStd` to `stream::Stream`. **Breaking.**
 
-  The runtime is what the module says, `std::stream` today and a sibling module the day an async one lands, so the type repeated it for nothing. Consumers import `pimalaya_stream::std::stream::Stream`, aliasing it where a `Stream` of their own is already in scope.
+  The module already says which transport this is, so the type repeated it for nothing. Consumers import `pimalaya_stream::stream::Stream`, aliasing it where a `Stream` of their own is already in scope.
+
+- Moved `std::stream` and `std::proxy` to the crate root as `stream` and `proxy`. **Breaking.**
+
+  The runtime module existed so an async twin could sit beside it as `tokio`, and there is none coming: this crate stays blocking. Imports lose the middle segment, `pimalaya_stream::std::stream::Stream` becoming `pimalaya_stream::stream::Stream`. The `std` cargo feature keeps its name and its job, gating the transport and the proxy selector so a consumer wanting only the TLS configuration vocabulary still gets it without sockets.
 
 ### Removed
 

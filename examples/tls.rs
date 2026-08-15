@@ -15,7 +15,7 @@ use std::{
 };
 
 use pimalaya_stream::{
-    std::stream::{Stream, StreamTlsConnectOptions},
+    stream::{Stream, StreamTlsConnectOptions},
     tls::Tls,
 };
 

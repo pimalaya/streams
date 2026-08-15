@@ -22,7 +22,7 @@ One options struct per transport, each holding what that transport actually has,
 - `StreamBuilder`, `StreamStd::builder`, `open` and `armed` are gone. A private `new` builds the handle and arms the deadline, which is the only thing every path must do.
 - `retry` becomes a public field on `Stream`, replacing `set_retry`. The one mid-connection switch that exists in the org is to `Never`, which arms nothing, so a setter that quietly re-armed the socket bought nothing and could clobber a deadline the caller had set.
 - `set_nonblocking` goes back to `&self` and stops mutating the strategy. With `retry` public, a caller writes `stream.retry = StreamRetry::Never` beside it, in one visible line, rather than having it done behind its back.
-- `StreamStd` becomes `Stream` and the private enum behind it becomes `StreamKind`. The runtime is what the module says, `std::stream` today and a sibling the day an async one lands, so the type was repeating it; the enum is a kind, and now says so.
+- `StreamStd` becomes `Stream` and the private enum behind it becomes `StreamKind`. The module already says which transport this is, so the type was repeating it; the enum is a kind, and now says so.
 - One `impl` block instead of three, public surface first and the private helpers under it.
 
 ## Cost

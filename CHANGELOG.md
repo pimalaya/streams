@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-08-15
+
 ### Added
 
 - Added examples for the three shapes a consumer opens a connection in: implicit TLS, a STARTTLS upgrade, and a connect through an explicitly configured proxy.
@@ -83,7 +85,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
   Forwarded to `native-tls/vendored` so consumers can compile the underlying TLS dependencies in vendored mode.
 
-[unreleased]: https://github.com/pimalaya/stream/compare/v0.1.2..HEAD
+[unreleased]: https://github.com/pimalaya/stream/compare/v0.2.0..HEAD
+[0.2.0]: https://github.com/pimalaya/stream/compare/v0.1.2..v0.2.0
 [0.1.2]: https://github.com/pimalaya/stream/compare/v0.1.1..v0.1.2
 [0.1.1]: https://github.com/pimalaya/stream/compare/v0.1.0..v0.1.1
 [0.1.0]: https://github.com/pimalaya/stream/compare/v0.0.1..v0.1.0

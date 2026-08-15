@@ -6,7 +6,7 @@ status: current
 
 # Proxy
 
-How a connection reaches its target: directly, through a SOCKS5 proxy, through an HTTP `CONNECT` proxy, or through whatever the environment names. Every transport funnels through the same dial, so proxy support is uniform across IMAP, SMTP, HTTP and any protocol added later.
+How a connection reaches its target: directly, through a SOCKS5 proxy, through an HTTP `CONNECT` proxy, or through whatever the environment names. Every transport funnels through the same connect, so proxy support is uniform across IMAP, SMTP, HTTP and any protocol added later.
 
 ### Requirement: Tunnels only
 
@@ -18,14 +18,14 @@ SOCKS5 SHALL carry the hostname to the proxy rather than an address resolved loc
 
 ### Requirement: Resolution from the environment
 
-The default proxy SHALL be resolved at dial time, not before, so the decision sees the actual target host.
+The default proxy SHALL be resolved at connect time, not before, so the decision sees the actual target host.
 
 `all_proxy` SHALL be read first, then `https_proxy`, each in its lowercase spelling before its uppercase one, an empty value counting as unset. A variable that fails to parse SHALL be logged and skipped rather than aborting the connection, falling through to the next source and finally to a direct connection.
 
 #### Scenario: A malformed variable
 - GIVEN `all_proxy` holding something that is not a proxy URL
-- WHEN a connection is dialled
-- THEN the variable is ignored, and the dial continues through the next source
+- WHEN a connection is opened
+- THEN the variable is ignored, and the connect continues through the next source
 
 ### Requirement: Bypass
 
@@ -33,7 +33,7 @@ Loopback targets SHALL always bypass the proxy, a proxy having no way to reach t
 
 #### Scenario: A suffix entry
 - GIVEN `no_proxy=example.com`
-- WHEN `mail.example.com` is dialled
+- WHEN `mail.example.com` is the target
 - THEN the connection goes direct
 
 ### Requirement: Proxy URLs

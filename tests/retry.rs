@@ -16,7 +16,10 @@ use std::{
     time::{Duration, Instant},
 };
 
-use pimalaya_stream::stream::{Stream, StreamRetry, StreamUnixConnectOptions};
+use pimalaya_stream::{
+    retry::StreamRetry,
+    stream::{Stream, StreamUnixConnectOptions},
+};
 
 /// Opens a stream on `retry` against a throwaway socket file, returning
 /// it with the accepted peer to drive the far side from.

@@ -9,11 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Added `std::stream::StreamRetry`, what a stream does when a read or a write reports it is not ready: `Never` hands the failure back untouched, `Until(Duration)` retries until that long passes without progress and then fails with `TimedOut`. Streams open with `StreamRetry::default()`, which is `Until` the new `std::stream::DEFAULT_RETRY_TIMEOUT` of one minute.
+- Added `retry::StreamRetry`, what a stream does when a read or a write reports it is not ready: `Never` hands the failure back untouched, `Until(Duration)` retries until that long passes without progress and then fails with `TimedOut`. Streams open with `StreamRetry::default()`, which is `Until` the new `retry::DEFAULT_RETRY_TIMEOUT` of one minute.
 
   A blocking socket is not supposed to report `EAGAIN`, yet callers do see one surface mid-exchange, macOS especially and the more readily the longer the exchange runs. Every protocol crate above was ending its exchange there, on a stream that was merely not ready yet: himalaya#731 and himalaya#732 are the same bare `Resource temporarily unavailable (os error 35)` reported from an IMAP `SORT` fallback and from a slow `AUTHENTICATE`, and every client arming a read deadline of its own was building the same failure in on purpose. The strategy is the only thing a caller chooses, `Read` and `Write` honoring it without a method of their own to call.
 
-- Added `std::stream::StreamTcpConnectOptions`, `std::stream::StreamTlsConnectOptions` and `std::stream::StreamUnixConnectOptions`, one per transport, each holding what that transport has and nothing more: a proxy where there is one to route through, TLS settings where there is a session to secure, and the retry strategy everywhere. All public fields with a `Default`, the shape the io- protocol crates already use for their own options.
+- Added `stream::StreamTcpConnectOptions`, `stream::StreamTlsConnectOptions` and `stream::StreamUnixConnectOptions`, one per transport, each holding what that transport has and nothing more: a proxy where there is one to route through, TLS settings where there is a session to secure, and the retry strategy everywhere. All public fields with a `Default`, the shape the io- protocol crates already use for their own options.
 
 ### Changed
 
@@ -39,13 +39,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
   The module already says which transport this is, so the type repeated it for nothing. Consumers import `pimalaya_stream::stream::Stream`, aliasing it where a `Stream` of their own is already in scope.
 
+- Moved `StreamRetry` and `DEFAULT_RETRY_TIMEOUT` to a `retry` module of their own, with the loop honoring them. **Breaking.**
+
+  The stream module carried two subjects: the transport it exists for, and the policy its reads and writes run under. The loop stays a method on `Stream`, running an operation being the job of the thing holding the socket, but it is written next to the strategy it honors.
+
+- Replaced `proxy::dial` with `Proxy::connect`. **Breaking.**
+
+  `dial(host, port, &proxy)` becomes `proxy.connect(host, port)`. A stream connects and a proxy dialled, which was one act under two verbs depending on the layer being read. The module's other free functions became private associated ones with it, so nothing floats at module level and the two public methods are visibly the surface.
+
 - Moved `std::stream` and `std::proxy` to the crate root as `stream` and `proxy`. **Breaking.**
 
   The runtime module existed so an async twin could sit beside it as `tokio`, and there is none coming: this crate stays blocking. Imports lose the middle segment, `pimalaya_stream::std::stream::Stream` becoming `pimalaya_stream::stream::Stream`. The `std` cargo feature keeps its name and its job, gating the transport and the proxy selector so a consumer wanting only the TLS configuration vocabulary still gets it without sockets.
 
 ### Removed
 
-- Removed `std::stream::StreamBuilder` and `Stream::builder`. **Breaking.**
+- Removed `stream::StreamBuilder` and `Stream::builder`. **Breaking.**
 
   Four entry points said the same thing: three constructors, a builder with a setter per field, and two private layers behind both. Chained setters were also a second vocabulary for a job the rest of Pimalaya does with an options struct. Everything the builder could say, the connect options say.
 

@@ -35,10 +35,11 @@
 //! Native TLS), ALPN identifiers and an optional extra trust anchor.
 //! [`stream`] (`std` feature) is the transport itself, one `Read +
 //! Write` handle over TCP, Unix sockets or a TLS session, with the
-//! upgrade from plain to TLS and the retry strategy its reads and
-//! writes honor. [`proxy`] (same feature) is the selector every connect
-//! funnels through (SOCKS5, HTTP CONNECT, or environment-resolved),
-//! defaulting to the ambient proxy variables.
+//! upgrade from plain to TLS. [`proxy`] (same feature) is the selector
+//! every connect funnels through (SOCKS5, HTTP CONNECT, or
+//! environment-resolved), defaulting to the ambient proxy variables,
+//! and [`retry`] (same again) is what a stream does when a socket
+//! reports it is not ready yet, which is not the same as broken.
 //!
 //! SASL is not here. The credential vocabulary and the mechanisms that
 //! compute payloads from it live in io-sasl, which is no_std and knows
@@ -57,6 +58,8 @@
 
 #[cfg(feature = "std")]
 pub mod proxy;
+#[cfg(feature = "std")]
+pub mod retry;
 #[cfg(feature = "std")]
 pub mod stream;
 pub mod tls;

@@ -1,14 +1,14 @@
-//! Proxy configuration and blocking dialers.
+//! How a connection reaches its target.
 //!
-//! [`Proxy`] selects how a TCP connection reaches its target: directly,
-//! through a SOCKS5 proxy, through an HTTP `CONNECT` proxy, or, the
-//! default, resolved from the environment at dial time. Every transport
-//! (IMAP, SMTP, HTTP, ...) funnels through [`dial`], so proxy support is
+//! [`Proxy`] selects it: directly, through a SOCKS5 proxy,
+//! through an HTTP `CONNECT` proxy, or, the default, resolved from the
+//! environment at connect time. Every transport (IMAP, SMTP, HTTP, ...)
+//! funnels through [`Proxy::connect`], so proxy support is
 //! uniform across protocols.
 //!
 //! Only the tunnel model is implemented: the target host and port stay
 //! opaque to the proxy, TLS still terminates at the target, and
-//! certificate validation stays bound to the target host (the dialer
+//! certificate validation stays bound to the target host (the connect
 //! returns a plain [`TcpStream`] to the target; the caller upgrades it).
 //! Plaintext HTTP forward proxying (absolute-URI request lines) is
 //! intentionally unsupported: it would leak proxy awareness into the HTTP
@@ -16,12 +16,12 @@
 //!
 //! The handshakes themselves live in the `io-proxy` crate (I/O-free
 //! coroutines for SOCKS5 and HTTP `CONNECT`); this module only owns the
-//! config concerns: resolving [`Proxy::System`] from the environment,
-//! `no_proxy` bypass and URL parsing, and drives those coroutines over
-//! the socket.
+//! config concerns: resolving [`Proxy::System`] from the
+//! environment, `no_proxy` bypass and URL parsing, and drives those
+//! coroutines over the socket.
 //!
-//! Logging follows the crate rules: debug marks the dial decision (kind,
-//! proxy endpoint, source). Credentials never reach the logs.
+//! Logging follows the crate rules: debug marks the connect decision
+//! (kind, proxy endpoint, source). Credentials never reach the logs.
 
 use std::{env, net::TcpStream};
 
@@ -71,7 +71,7 @@ pub enum Proxy {
         /// Optional `Proxy-Authorization: Basic` credentials.
         auth: Option<ProxyAuth>,
     },
-    /// Resolve from the environment at dial time (default).
+    /// Resolve from the environment at connect time (default).
     ///
     /// A `no_proxy` match (plus loopback, always) bypasses the proxy;
     /// otherwise `all_proxy` wins, then `https_proxy`. Both the lowercase
@@ -84,9 +84,9 @@ impl Proxy {
     /// Parses a proxy URL such as `socks5://user:pass@host:1080` or
     /// `http://proxy.corp:3128`.
     ///
-    /// `socks5`, `socks5h` and `socks` map to [`Proxy::Socks5`]; `http`
-    /// and `https` map to [`Proxy::Http`] (`CONNECT` tunnelling).
-    pub fn from_url(raw: &str) -> Result<Proxy> {
+    /// `socks5`, `socks5h` and `socks` map to [`Self::Socks5`]; `http`
+    /// and `https` map to [`Self::Http`] (`CONNECT` tunnelling).
+    pub fn from_url(raw: &str) -> Result<Self> {
         let url = Url::parse(raw).with_context(|| format!("parse proxy url {raw}"))?;
 
         let host = url
@@ -105,140 +105,146 @@ impl Proxy {
         match url.scheme() {
             "socks5" | "socks5h" | "socks" => {
                 let port = url.port().unwrap_or(1080);
-                Ok(Proxy::Socks5 { host, port, auth })
+                Ok(Self::Socks5 { host, port, auth })
             }
             "http" | "https" => {
                 let port = url.port().unwrap_or(8080);
-                Ok(Proxy::Http { host, port, auth })
+                Ok(Self::Http { host, port, auth })
             }
             other => bail!("unsupported proxy scheme `{other}` in {raw}"),
         }
     }
-}
 
-/// Opens a plain [`TcpStream`] to `host:port`, tunnelling through `proxy`.
-///
-/// [`Proxy::System`] is resolved from the environment here (never before),
-/// so `no_proxy` sees the actual target. On success the returned stream is
-/// positioned at the start of the tunnel, ready for the caller's TLS
-/// handshake or plaintext protocol.
-pub fn dial(host: &str, port: u16, proxy: &Proxy) -> Result<TcpStream> {
-    let (proxy, source) = match proxy {
-        Proxy::System => resolve_from_env(host),
-        other => (other.clone(), "config"),
-    };
-
-    match &proxy {
-        Proxy::None => {
-            debug!("dial {host}:{port} directly (source: {source})");
-            Ok(TcpStream::connect((host, port))
-                .with_context(|| format!("connect {host}:{port}"))?)
-        }
-        Proxy::Socks5 {
-            host: phost,
-            port: pport,
-            auth,
-        } => {
-            debug!("dial {host}:{port} via socks5 proxy {phost}:{pport} (source: {source})");
-            let mut tcp = TcpStream::connect((phost.as_str(), *pport))
-                .with_context(|| format!("connect socks5 proxy {phost}:{pport}"))?;
-            let target = Socks5Address::new(host, port)?;
-            let credentials = match auth {
-                Some(auth) => Some(Socks5Credentials::new(
-                    &auth.user,
-                    auth.pass.expose_secret(),
-                )?),
-                None => None,
-            };
-            connect_socks5(&mut tcp, target, credentials)
-                .with_context(|| format!("socks5 handshake to {host}:{port}"))?;
-            Ok(tcp)
-        }
-        Proxy::Http {
-            host: phost,
-            port: pport,
-            auth,
-        } => {
-            debug!("dial {host}:{port} via http proxy {phost}:{pport} (source: {source})");
-            let mut tcp = TcpStream::connect((phost.as_str(), *pport))
-                .with_context(|| format!("connect http proxy {phost}:{pport}"))?;
-            let credentials = auth
-                .as_ref()
-                .map(|auth| HttpCredentials::new(&auth.user, auth.pass.expose_secret()));
-            connect_http(&mut tcp, host, port, credentials)
-                .with_context(|| format!("http connect to {host}:{port}"))?;
-            Ok(tcp)
-        }
-        // NOTE: System is resolved to a concrete variant above.
-        Proxy::System => unreachable!("System proxy resolved before match"),
-    }
-}
-
-/// Reads an environment proxy variable, lowercase spelling first then
-/// uppercase, treating an empty value as unset.
-fn env_var(lower: &str) -> Option<String> {
-    let non_empty = |v: String| if v.is_empty() { None } else { Some(v) };
-    env::var(lower)
-        .ok()
-        .and_then(non_empty)
-        .or_else(|| env::var(lower.to_uppercase()).ok().and_then(non_empty))
-}
-
-/// Whether `host` bypasses the proxy: loopback always, plus any `no_proxy`
-/// entry (suffix match, or `*` for everything).
-fn is_bypassed(host: &str) -> bool {
-    let host = host.trim().trim_end_matches('.').to_ascii_lowercase();
-
-    // a proxy cannot reach the caller's own loopback; never tunnel it
-    if host == "localhost" || host.ends_with(".localhost") || host == "127.0.0.1" || host == "::1" {
-        return true;
-    }
-
-    let Some(no_proxy) = env_var("no_proxy") else {
-        return false;
-    };
-
-    for entry in no_proxy.split(',') {
-        let entry = entry
-            .trim()
-            .trim_start_matches('.')
-            .trim_end_matches('.')
-            .to_ascii_lowercase();
-
-        if entry.is_empty() {
-            continue;
-        }
-        if entry == "*" {
-            return true;
-        }
-        if host == entry || host.ends_with(&format!(".{entry}")) {
-            return true;
-        }
-    }
-
-    false
-}
-
-/// Resolves [`Proxy::System`] against the environment for `target_host`,
-/// returning the concrete proxy and a label naming the source (for logs).
-fn resolve_from_env(target_host: &str) -> (Proxy, &'static str) {
-    if is_bypassed(target_host) {
-        return (Proxy::None, "no_proxy");
-    }
-
-    for (var, label) in [("all_proxy", "all_proxy"), ("https_proxy", "https_proxy")] {
-        let Some(raw) = env_var(var) else {
-            continue;
+    /// Opens a plain [`TcpStream`] to `host:port`, tunnelling through
+    /// this proxy.
+    ///
+    /// [`Self::System`] is resolved against the environment here (never
+    /// before), so `no_proxy` sees the actual target. On success the
+    /// returned stream is positioned at the start of the tunnel, ready
+    /// for the caller's TLS handshake or plaintext protocol.
+    pub fn connect(&self, host: &str, port: u16) -> Result<TcpStream> {
+        let (proxy, source) = match self {
+            Self::System => Self::from_env(host),
+            other => (other.clone(), "config"),
         };
-        match Proxy::from_url(&raw) {
-            Ok(proxy) => return (proxy, label),
-            // a malformed variable should not abort the connection: warn
-            // and fall through to the next source, then to direct.
-            Err(err) => debug!("ignoring invalid {label}: {err:#}"),
+
+        match &proxy {
+            Self::None => {
+                debug!("connect {host}:{port} directly (source: {source})");
+                Ok(TcpStream::connect((host, port))
+                    .with_context(|| format!("connect {host}:{port}"))?)
+            }
+            Self::Socks5 {
+                host: phost,
+                port: pport,
+                auth,
+            } => {
+                debug!("connect {host}:{port} via socks5 proxy {phost}:{pport} (source: {source})");
+                let mut tcp = TcpStream::connect((phost.as_str(), *pport))
+                    .with_context(|| format!("connect socks5 proxy {phost}:{pport}"))?;
+                let target = Socks5Address::new(host, port)?;
+                let credentials = match auth {
+                    Some(auth) => Some(Socks5Credentials::new(
+                        &auth.user,
+                        auth.pass.expose_secret(),
+                    )?),
+                    None => None,
+                };
+                connect_socks5(&mut tcp, target, credentials)
+                    .with_context(|| format!("socks5 handshake to {host}:{port}"))?;
+                Ok(tcp)
+            }
+            Self::Http {
+                host: phost,
+                port: pport,
+                auth,
+            } => {
+                debug!("connect {host}:{port} via http proxy {phost}:{pport} (source: {source})");
+                let mut tcp = TcpStream::connect((phost.as_str(), *pport))
+                    .with_context(|| format!("connect http proxy {phost}:{pport}"))?;
+                let credentials = auth
+                    .as_ref()
+                    .map(|auth| HttpCredentials::new(&auth.user, auth.pass.expose_secret()));
+                connect_http(&mut tcp, host, port, credentials)
+                    .with_context(|| format!("http connect to {host}:{port}"))?;
+                Ok(tcp)
+            }
+            // NOTE: System is resolved to a concrete variant above.
+            Self::System => unreachable!("System proxy resolved before match"),
         }
     }
 
-    (Proxy::None, "direct")
+    /// Resolves [`Self::System`] against the environment for
+    /// `target_host`, returning the concrete proxy and a label naming
+    /// the source (for logs).
+    fn from_env(target_host: &str) -> (Self, &'static str) {
+        if Self::bypasses(target_host) {
+            return (Self::None, "no_proxy");
+        }
+
+        for (var, label) in [("all_proxy", "all_proxy"), ("https_proxy", "https_proxy")] {
+            let Some(raw) = Self::env_var(var) else {
+                continue;
+            };
+            match Self::from_url(&raw) {
+                Ok(proxy) => return (proxy, label),
+                // a malformed variable should not abort the connection: warn
+                // and fall through to the next source, then to direct.
+                Err(err) => debug!("ignoring invalid {label}: {err:#}"),
+            }
+        }
+
+        (Self::None, "direct")
+    }
+
+    /// Whether `host` bypasses the proxy: loopback always, plus any
+    /// `no_proxy` entry (suffix match, or `*` for everything).
+    fn bypasses(host: &str) -> bool {
+        let host = host.trim().trim_end_matches('.').to_ascii_lowercase();
+
+        // a proxy cannot reach the caller's own loopback; never tunnel it
+        if host == "localhost"
+            || host.ends_with(".localhost")
+            || host == "127.0.0.1"
+            || host == "::1"
+        {
+            return true;
+        }
+
+        let Some(no_proxy) = Self::env_var("no_proxy") else {
+            return false;
+        };
+
+        for entry in no_proxy.split(',') {
+            let entry = entry
+                .trim()
+                .trim_start_matches('.')
+                .trim_end_matches('.')
+                .to_ascii_lowercase();
+
+            if entry.is_empty() {
+                continue;
+            }
+            if entry == "*" {
+                return true;
+            }
+            if host == entry || host.ends_with(&format!(".{entry}")) {
+                return true;
+            }
+        }
+
+        false
+    }
+
+    /// Reads an environment proxy variable, lowercase spelling first
+    /// then uppercase, treating an empty value as unset.
+    fn env_var(lower: &str) -> Option<String> {
+        let non_empty = |v: String| if v.is_empty() { None } else { Some(v) };
+        env::var(lower)
+            .ok()
+            .and_then(non_empty)
+            .or_else(|| env::var(lower.to_uppercase()).ok().and_then(non_empty))
+    }
 }
 
 #[cfg(test)]
@@ -280,9 +286,9 @@ mod tests {
 
     #[test]
     fn loopback_is_always_bypassed() {
-        assert!(is_bypassed("localhost"));
-        assert!(is_bypassed("127.0.0.1"));
-        assert!(is_bypassed("::1"));
-        assert!(is_bypassed("dev.localhost"));
+        assert!(Proxy::bypasses("localhost"));
+        assert!(Proxy::bypasses("127.0.0.1"));
+        assert!(Proxy::bypasses("::1"));
+        assert!(Proxy::bypasses("dev.localhost"));
     }
 }

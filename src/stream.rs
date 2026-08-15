@@ -8,13 +8,12 @@
 //! A stream is opened by one of the `connect_*` methods, each taking the
 //! options its transport has and nothing more: a proxy where there is
 //! one to route through, TLS settings where there is a session to
-//! secure, and the retry strategy everywhere.
+//! secure, and the [`StreamRetry`] strategy everywhere.
 //!
 //! That strategy is what reads and writes do when a socket reports it is
-//! not ready yet, which is not the same as broken, though every protocol
-//! crate above was ending its exchange on it. `Read` and `Write` honor
-//! it without a method of their own, and connecting arms the socket read
-//! deadline it implies, which is what makes it enforceable.
+//! not ready yet, and connecting arms the socket read deadline it
+//! implies, which is what makes it enforceable. The loop honoring it
+//! lives in [`crate::retry`], next to the strategy itself.
 //!
 //! [`Tls`]: crate::tls::Tls
 
@@ -24,8 +23,7 @@ use std::{
     io::{self, Read, Write},
     net::TcpStream,
     path::Path,
-    thread,
-    time::{Duration, Instant},
+    time::Duration,
 };
 
 use anyhow::{Result, bail};
@@ -33,24 +31,7 @@ use log::{debug, trace};
 #[cfg(windows)]
 use uds_windows::UnixStream;
 
-use crate::{
-    proxy::{Proxy, dial},
-    tls::Tls,
-};
-
-/// How long [`StreamRetry::default`] keeps retrying a stream that is
-/// not ready.
-pub const DEFAULT_RETRY_TIMEOUT: Duration = Duration::from_secs(60);
-
-/// Pause before the first retry, doubled on each further one up to
-/// [`RETRY_BACKOFF_MAX`].
-///
-/// It only comes into play when the stream reports not-ready without
-/// having waited, a socket read deadline being what otherwise paces the
-/// attempts.
-const RETRY_BACKOFF_MIN: Duration = Duration::from_millis(1);
-/// Longest pause between two retries.
-const RETRY_BACKOFF_MAX: Duration = Duration::from_millis(250);
+use crate::{proxy::Proxy, retry::StreamRetry, tls::Tls};
 
 #[derive(Debug)]
 enum StreamKind {
@@ -96,76 +77,6 @@ impl StreamKind {
             StreamKind::NativeTls(s) => s.flush(),
         }
     }
-}
-
-/// What a stream does when a read or a write reports it is not ready.
-///
-/// A blocking socket is not supposed to report `EAGAIN`, yet callers do
-/// see one surface mid-exchange (macOS especially), and any socket
-/// carrying a read deadline reports its expiry the same way. Neither
-/// says the session is over, so a strategy says how long to keep asking
-/// before it is called one.
-#[derive(Clone, Copy, Debug)]
-pub enum StreamRetry {
-    /// Hands every failure back to the caller, untouched.
-    ///
-    /// For a loop that wants the not-ready failures: a watcher polling
-    /// a shutdown flag between IDLE keep-alives, a socket driven from a
-    /// poller. Such a caller arms its own read deadline, and connecting
-    /// with this strategy arms none.
-    Never,
-    /// Retries until this long passes without the stream making
-    /// progress, then fails with `TimedOut` and a message saying so.
-    ///
-    /// Each read and each write gets its own budget, so a slow but
-    /// progressing transfer never runs out. Connecting with it arms the
-    /// socket read deadline to the same value, without which a server
-    /// that goes silent would block the caller rather than run the
-    /// budget down.
-    Until(Duration),
-}
-
-impl Default for StreamRetry {
-    /// Retries for [`DEFAULT_RETRY_TIMEOUT`].
-    fn default() -> Self {
-        Self::Until(DEFAULT_RETRY_TIMEOUT)
-    }
-}
-
-/// Options for [`Stream::connect_tcp`].
-#[derive(Clone, Debug, Default)]
-pub struct StreamTcpConnectOptions {
-    /// How the connection reaches its target. Defaults to
-    /// [`Proxy::System`], resolved from the environment at dial time.
-    pub proxy: Proxy,
-    /// What the stream does when a read or a write reports it is not
-    /// ready. Defaults to [`StreamRetry::default`].
-    pub retry: StreamRetry,
-}
-
-/// Options for [`Stream::connect_tls`].
-#[derive(Clone, Debug, Default)]
-pub struct StreamTlsConnectOptions {
-    /// How the session is secured: provider, crypto, ALPN, an extra
-    /// certificate to trust.
-    pub tls: Tls,
-    /// How the connection reaches its target. Defaults to
-    /// [`Proxy::System`], resolved from the environment at dial time.
-    pub proxy: Proxy,
-    /// What the stream does when a read or a write reports it is not
-    /// ready. Defaults to [`StreamRetry::default`].
-    pub retry: StreamRetry,
-}
-
-/// Options for [`Stream::connect_unix`].
-#[derive(Clone, Debug, Default)]
-pub struct StreamUnixConnectOptions {
-    /// What the stream does when a read or a write reports it is not
-    /// ready. Defaults to [`StreamRetry::default`].
-    ///
-    /// A local socket has neither a proxy nor a TLS session to
-    /// configure, which is why this is the whole of it.
-    pub retry: StreamRetry,
 }
 
 /// Blocking transport handle: TCP, Unix-domain or TLS, behind one
@@ -230,7 +141,7 @@ impl Stream {
         trace!("host: {host}");
         trace!("port: {port}");
 
-        let tcp = dial(&host, port, &opts.proxy)?;
+        let tcp = opts.proxy.connect(&host, port)?;
 
         debug!("tcp stream connected");
         Self::new(StreamKind::Tcp(tcp), host, opts.retry)
@@ -248,7 +159,7 @@ impl Stream {
         trace!("host: {host}");
         trace!("port: {port}");
 
-        let tcp = dial(&host, port, &opts.proxy)?;
+        let tcp = opts.proxy.connect(&host, port)?;
         let kind = Self::_upgrade_tls(&host, tcp, &opts.tls)?;
 
         Self::new(kind, host, opts.retry)
@@ -425,51 +336,6 @@ impl Stream {
         }
     }
 
-    /// Attempts `op` until it succeeds, fails for a reason other than
-    /// "not ready yet", or this stream's [`StreamRetry`] runs out.
-    ///
-    /// The one place a strategy is honored, shared by the read, the
-    /// write and the flush so none of them can drift from the other two.
-    fn retry<T>(&mut self, mut op: impl FnMut(&mut StreamKind) -> io::Result<T>) -> io::Result<T> {
-        let StreamRetry::Until(timeout) = self.retry else {
-            return op(&mut self.kind);
-        };
-
-        let start = Instant::now();
-        let mut backoff = RETRY_BACKOFF_MIN;
-        let mut retries = 0usize;
-
-        loop {
-            let err = match op(&mut self.kind) {
-                Err(err) if err.kind() == io::ErrorKind::Interrupted => continue,
-                Err(err) if matches!(err.kind(), io::ErrorKind::TimedOut) => err,
-                Err(err) if matches!(err.kind(), io::ErrorKind::WouldBlock) => err,
-                Err(err) => return Err(err),
-                Ok(out) => {
-                    if retries > 0 {
-                        debug!("stream ready again after {retries} retries");
-                    }
-                    return Ok(out);
-                }
-            };
-
-            if start.elapsed() >= timeout {
-                debug!("give up on stream after {retries} retries: {err}");
-                let kind = io::ErrorKind::TimedOut;
-                let msg = format!("stream stopped responding after {timeout:?}");
-                return Err(io::Error::new(kind, msg));
-            }
-
-            let kind = err.kind();
-            let errno = err.raw_os_error();
-            debug!("retry stream after transient {kind:?} failure (errno {errno:?}): {err}");
-
-            thread::sleep(backoff);
-            backoff = (backoff * 2).min(RETRY_BACKOFF_MAX);
-            retries += 1;
-        }
-    }
-
     /// Sets the read timeout on the underlying socket; `None` blocks
     /// forever.
     ///
@@ -512,7 +378,7 @@ impl Read for Stream {
     /// Reads under the stream's [`StreamRetry`] strategy: a socket
     /// reporting it is not ready costs an attempt, not the exchange.
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-        self.retry(|stream| stream.read_once(buf))
+        self.retry(|stream| stream.kind.read_once(buf))
     }
 }
 
@@ -521,12 +387,48 @@ impl Write for Stream {
     /// makes the `write_all` built on top of it survive a socket that is
     /// momentarily full.
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        self.retry(|stream| stream.write_once(buf))
+        self.retry(|stream| stream.kind.write_once(buf))
     }
 
     fn flush(&mut self) -> io::Result<()> {
-        self.retry(|stream| stream.flush_once())
+        self.retry(|stream| stream.kind.flush_once())
     }
+}
+
+/// Options for [`Stream::connect_unix`].
+#[derive(Clone, Debug, Default)]
+pub struct StreamUnixConnectOptions {
+    /// What the stream does when a read or a write reports it is not
+    /// ready. Defaults to [`StreamRetry::default`].
+    ///
+    /// A local socket has neither a proxy nor a TLS session to
+    /// configure, which is why this is the whole of it.
+    pub retry: StreamRetry,
+}
+
+/// Options for [`Stream::connect_tcp`].
+#[derive(Clone, Debug, Default)]
+pub struct StreamTcpConnectOptions {
+    /// How the connection reaches its target. Defaults to
+    /// [`Proxy::System`], resolved from the environment at connect time.
+    pub proxy: Proxy,
+    /// What the stream does when a read or a write reports it is not
+    /// ready. Defaults to [`StreamRetry::default`].
+    pub retry: StreamRetry,
+}
+
+/// Options for [`Stream::connect_tls`].
+#[derive(Clone, Debug, Default)]
+pub struct StreamTlsConnectOptions {
+    /// How the session is secured: provider, crypto, ALPN, an extra
+    /// certificate to trust.
+    pub tls: Tls,
+    /// How the connection reaches its target. Defaults to
+    /// [`Proxy::System`], resolved from the environment at connect time.
+    pub proxy: Proxy,
+    /// What the stream does when a read or a write reports it is not
+    /// ready. Defaults to [`StreamRetry::default`].
+    pub retry: StreamRetry,
 }
 
 /// Certificate pinning for the rustls TLS branch.

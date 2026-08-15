@@ -45,7 +45,7 @@ Options SHALL be plain structs of public fields with a `Default`, filled in as a
 #### Scenario: A caller with its own proxy configuration
 - GIVEN a proxy read from the caller's own configuration file
 - WHEN the stream is opened with options carrying that proxy
-- THEN the connection is dialled through it rather than through the environment's
+- THEN the connection goes through it rather than through the environment's
 
 #### Scenario: A caller with nothing to say
 - GIVEN a caller wanting the ambient proxy and the default strategy

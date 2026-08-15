@@ -33,8 +33,8 @@ fn main() -> Result<(), Box<dyn Error>> {
     let mut stream = Stream::connect_tcp(&host, port, opts)?;
     let mut buf = [0u8; 4096];
 
-    // NOTE: greeting, then EHLO, then the upgrade command. A real
-    // client reads these through a parser rather than by eye.
+    // NOTE: a real client reads these replies through a parser rather
+    // than by eye
     let n = stream.read(&mut buf)?;
     print!("{}", String::from_utf8_lossy(&buf[..n]));
 

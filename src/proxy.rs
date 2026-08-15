@@ -169,7 +169,6 @@ impl Proxy {
                     .with_context(|| format!("http connect to {host}:{port}"))?;
                 Ok(tcp)
             }
-            // NOTE: System is resolved to a concrete variant above.
             Self::System => unreachable!("System proxy resolved before match"),
         }
     }
@@ -188,8 +187,7 @@ impl Proxy {
             };
             match Self::from_url(&raw) {
                 Ok(proxy) => return (proxy, label),
-                // a malformed variable should not abort the connection: warn
-                // and fall through to the next source, then to direct.
+                // NOTE: a malformed variable must not abort the connection
                 Err(err) => debug!("ignoring invalid {label}: {err:#}"),
             }
         }
@@ -202,7 +200,7 @@ impl Proxy {
     fn bypasses(host: &str) -> bool {
         let host = host.trim().trim_end_matches('.').to_ascii_lowercase();
 
-        // a proxy cannot reach the caller's own loopback; never tunnel it
+        // NOTE: a proxy cannot reach the caller's own loopback
         if host == "localhost"
             || host.ends_with(".localhost")
             || host == "127.0.0.1"

@@ -1,9 +1,9 @@
 [package]
 name = "pimalaya-stream"
-description = "Blocking stream and TLS utils for Pimalaya"
+description = "Blocking stream and TLS utils for the Pimalaya io- protocol crates"
 version = "0.2.0"
 authors = ["Clément DOUIN (soywod) <pimalaya.org@posteo.net>"]
-rust-version = "1.87"
+rust-version = "1.88"
 edition = "2024"
 license = "MIT OR Apache-2.0"
 categories = ["api-bindings", "network-programming"]

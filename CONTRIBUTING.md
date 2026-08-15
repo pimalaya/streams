@@ -7,10 +7,9 @@ Whether you are a human or an AI agent, read these in order before touching the 
 1. the [Pimalaya README](https://github.com/pimalaya) for what the project is and how its repositories stack;
 2. the [Pimalaya CONTRIBUTING](https://github.com/pimalaya/.github/blob/master/CONTRIBUTING.md) guide, which chains to the shared architecture and guidelines;
 3. the inline header documentation, starting with src/lib.rs: it is the architecture document of this crate;
-4. the [cairn/](./cairn) folder for what the crate does today, the work in flight and the dated history (the Cairn convention: spec/, changes/, log/);
-5. this guide, for what differs from the Pimalaya standards.
+4. the [cairn/](./cairn) folder for the development history and living plans (the Cairn convention: spec/, changes/, log/).
 
-Everything below documents only the differences.
+Everything below documents only what differs from the Pimalaya standards.
 
 ## Cairn
 
@@ -23,9 +22,11 @@ Every io- protocol crate sits on this transport, so a behaviour change here reac
 pimalaya-stream wraps TLS providers and sockets and exposes no I/O-free coroutines, so the no_std layer checks of the org guide do not apply: there is no coroutine core to keep std-free. The layers to build against are the feature-gated transport and TLS providers:
 
 ```sh
-cargo build --no-default-features                          # sasl + tls configs only
-cargo build --no-default-features --features std           # + blocking transport, no TLS
+cargo build --no-default-features                          # tls config vocabulary only
+cargo build --no-default-features --features std           # + transport and proxy, no TLS
 cargo build                                                # rustls-ring (default)
 cargo build --no-default-features --features rustls-aws
 cargo build --no-default-features --features native-tls
 ```
+
+There is no async twin planned, so the modules sit flat at the crate root rather than under a runtime one. Should one ever land, that is the decision to revisit first.

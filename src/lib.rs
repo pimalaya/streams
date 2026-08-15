@@ -46,6 +46,14 @@
 //! nothing about sockets; a protocol crate reaching for authentication
 //! reaches there, and this crate stays what its name says.
 //!
+//! ## Where to read further
+//!
+//! Runnable programs for the three shapes a connection takes live in
+//! the examples folder: implicit TLS, a STARTTLS upgrade, and a connect
+//! through an explicitly configured proxy. What the crate does today,
+//! capability by capability, is written down under cairn/spec, with the
+//! dated history of how it got there under cairn/log.
+//!
 //! ## Conventions
 //!
 //! The conventions every Pimalaya repository shares are described in

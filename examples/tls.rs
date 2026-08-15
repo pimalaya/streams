@@ -26,9 +26,8 @@ fn main() -> Result<(), Box<dyn Error>> {
     let port: u16 = env::var("PORT").unwrap_or_else(|_| "993".into()).parse()?;
 
     // NOTE: the defaults pick the first enabled provider and the
-    // platform trust anchors; `alpn` and `cert` are the two fields a
-    // protocol client usually sets. The other options default to the
-    // ambient proxy and to retrying a not-ready stream for a minute.
+    // platform trust anchors, `alpn` and `cert` being what a protocol
+    // client usually sets
     let opts = StreamTlsConnectOptions {
         tls: Tls::default(),
         ..Default::default()

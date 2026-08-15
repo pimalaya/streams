@@ -1,8 +1,8 @@
 # Stream [![Documentation](https://img.shields.io/docsrs/pimalaya-stream?style=flat&logo=docs.rs&logoColor=white)](https://docs.rs/pimalaya-stream/latest/pimalaya_stream) [![Matrix](https://img.shields.io/badge/chat-%23pimalaya-blue?style=flat&logo=matrix&logoColor=white)](https://matrix.to/#/#pimalaya:matrix.org) [![Mastodon](https://img.shields.io/badge/news-%40pimalaya-blue?style=flat&logo=mastodon&logoColor=white)](https://fosstodon.org/@pimalaya) [![Sponsor](https://img.shields.io/badge/sponsor-pink?style=flat&logo=github-sponsors&logoColor=white)](https://pimalaya.org/sponsor/)
 
-Blocking stream and TLS utils for the Pimalaya io- protocol crates and their consumers
+Blocking stream and TLS utils for the Pimalaya io- protocol crates
 
-This crate opens and upgrades the blocking streams the io- protocol clients run on: TCP connections, TLS connections, Unix-domain sockets, proxy resolution and the plain-to-TLS upgrade STARTTLS flows need. It is public, and meant for anyone building a client on io-imap, io-smtp, io-http or a sibling, not only for Pimalaya's own products. Reusing it is the supported path, reimplementing TCP, TLS, proxy resolution and the STARTTLS upgrade is not.
+It opens the streams those clients run on: TCP, TLS and Unix-domain sockets, proxy resolution, and the plain-to-TLS upgrade STARTTLS needs. Anyone building a client on io-imap, io-smtp, io-http or a sibling is a first-class consumer.
 
 > [!NOTE]
 > The crate stays on 0.x, which means breaking changes land in minor bumps and never in patch bumps. Pin a minor version and read the [changelog](./CHANGELOG.md) before upgrading.
@@ -11,6 +11,7 @@ This crate opens and upgrades the blocking streams the io- protocol clients run 
 
 - [Features](#features)
 - [Usage](#usage)
+- [Examples](#examples)
 - [AI policy](https://github.com/pimalaya/.github/blob/master/AI_POLICY.md)
 - [License](#license)
 - [Social](#social)
@@ -19,8 +20,9 @@ This crate opens and upgrades the blocking streams the io- protocol clients run 
 
 ## Features
 
-- **Blocking stream**: one handle wrapping a TCP socket, a Unix-domain socket or a TLS session, with the plain-to-TLS upgrade STARTTLS flows need (requires `std` feature).
-- **Proxy**: every connect can tunnel through a SOCKS5 or HTTP `CONNECT` proxy, resolved from the ambient proxy environment variables by default (requires `std` feature).
+- **Blocking stream**: one handle over a TCP socket, a Unix-domain socket or a TLS session, with the STARTTLS upgrade (requires `std` feature).
+- **Proxy**: tunnel through SOCKS5 or HTTP `CONNECT`, resolved from the ambient proxy variables by default (requires `std` feature).
+- **Retry**: a socket reporting it is not ready is retried under a per-stream strategy, instead of ending the exchange (requires `std` feature).
 - **TLS** support:
   - [Rustls](https://crates.io/crates/rustls) with ring crypto (requires `rustls-ring` feature, enabled by default)
   - [Rustls](https://crates.io/crates/rustls) with aws crypto (requires `rustls-aws` feature)
@@ -32,6 +34,10 @@ This crate opens and upgrades the blocking streams the io- protocol clients run 
 ## Usage
 
 The whole API is documented on [docs.rs](https://docs.rs/pimalaya-stream/latest/pimalaya_stream); the io- protocol crates and their std clients are its real-world consumers.
+
+## Examples
+
+Complete runnable programs live in [./examples](./examples); the tests also demonstrate real usage.
 
 ## License
 

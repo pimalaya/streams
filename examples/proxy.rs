@@ -25,9 +25,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let port: u16 = env::var("PORT").unwrap_or_else(|_| "993".into()).parse()?;
 
     // NOTE: `socks5://`, `socks5h://`, `socks://`, `http://` and
-    // `https://` parse, with optional credentials in the URL. Without
-    // the variable this falls back to the ambient one, which is what
-    // the options default to.
+    // `https://` parse, with optional credentials in the URL
     let proxy = match env::var("PROXY") {
         Ok(url) => Proxy::from_url(&url)?,
         Err(_) => Proxy::System,

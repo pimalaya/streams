@@ -329,8 +329,8 @@ impl Stream {
                 Ok(StreamKind::NativeTls(session))
             }
 
-            // NOTE: every provider is matched above; the pattern only
-            // remains reachable on partial feature sets.
+            // NOTE: reachable only on a partial feature set, every
+            // provider being matched above
             #[allow(unreachable_patterns)]
             _ => unreachable!(),
         }

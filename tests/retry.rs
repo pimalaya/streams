@@ -91,7 +91,7 @@ fn a_broken_stream_is_reported_on_the_spot() {
     let err = stream.write(b"A1 NOOP\r\n").unwrap_err();
 
     assert_eq!(err.kind(), std::io::ErrorKind::BrokenPipe);
-    // the budget was a minute: anything close to it would mean the write
-    // was retried, which a broken pipe never is
+    // NOTE: the budget was a minute, so anything close to it would mean
+    // the write was retried, which a broken pipe never is
     assert!(start.elapsed() < Duration::from_secs(1));
 }

@@ -1,6 +1,6 @@
 # Stream [![Documentation](https://img.shields.io/docsrs/pimalaya-stream?style=flat&logo=docs.rs&logoColor=white)](https://docs.rs/pimalaya-stream/latest/pimalaya_stream) [![Matrix](https://img.shields.io/badge/chat-%23pimalaya-blue?style=flat&logo=matrix&logoColor=white)](https://matrix.to/#/#pimalaya:matrix.org) [![Mastodon](https://img.shields.io/badge/news-%40pimalaya-blue?style=flat&logo=mastodon&logoColor=white)](https://fosstodon.org/@pimalaya) [![Sponsor](https://img.shields.io/badge/sponsor-pink?style=flat&logo=github-sponsors&logoColor=white)](https://pimalaya.org/sponsor/)
 
-Blocking stream and TLS utils for the Pimalaya io- protocol crates
+Blocking stream and TLS utils for Pimalaya
 
 It opens the streams those clients run on: TCP, TLS and Unix-domain sockets, proxy resolution, and the plain-to-TLS upgrade STARTTLS needs. Anyone building a client on io-imap, io-smtp, io-http or a sibling is a first-class consumer.
 
@@ -33,11 +33,11 @@ It opens the streams those clients run on: TCP, TLS and Unix-domain sockets, pro
 
 ## Usage
 
-The whole API is documented on [docs.rs](https://docs.rs/pimalaya-stream/latest/pimalaya_stream); the io- protocol crates and their std clients are its real-world consumers.
+See documentation at [docs.rs](https://docs.rs/pimalaya-stream/latest/pimalaya_stream).
 
 ## Examples
 
-Complete runnable programs live in [./examples](./examples); the tests also demonstrate real usage.
+See complete examples at [./examples](./examples).
 
 ## License
 

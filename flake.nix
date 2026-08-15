@@ -1,9 +1,8 @@
 {
-  description = "Stream, TLS and SASL utils for Pimalaya";
+  description = "Blocking stream and TLS utils for Pimalaya";
 
   inputs = {
     nixpkgs = {
-      # until crates.io fix fully backported
       url = "github:nixos/nixpkgs/nixos-25.11";
     };
     fenix = {

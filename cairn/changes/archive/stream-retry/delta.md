@@ -9,7 +9,7 @@ change: stream-retry
 
 A stream SHALL carry a retry strategy, and `Read` and `Write` SHALL honor it. No method of its own SHALL be exposed for it: a caller picks the strategy, and every read, write and flush it already writes behaves accordingly.
 
-`StreamRetry::Never` SHALL hand every failure back untouched. `StreamRetry::Until(d)` SHALL retry until `d` passes without the stream making progress. A stream SHALL open on the default strategy, which retries for one minute.
+`Retry::Never` SHALL hand every failure back untouched. `Retry::Until(d)` SHALL retry until `d` passes without the stream making progress. A stream SHALL open on the default strategy, which retries for one minute.
 
 ### Requirement: What counts as not ready
 
@@ -23,11 +23,11 @@ Exhausting the budget SHALL fail with `TimedOut` and a message naming the elapse
 
 ### Requirement: The deadline the strategy arms
 
-Selecting `StreamRetry::Until(d)` SHALL arm the socket read deadline to `d`, at open time and whenever the strategy is set afterwards. `StreamRetry::Never` SHALL leave the deadline alone.
+Selecting `Retry::Until(d)` SHALL arm the socket read deadline to `d`, at open time and whenever the strategy is set afterwards. `Retry::Never` SHALL leave the deadline alone.
 
 ### Requirement: Non-blocking mode wins
 
-Turning non-blocking mode on SHALL drop the strategy to `StreamRetry::Never`.
+Turning non-blocking mode on SHALL drop the strategy to `Retry::Never`.
 
 ## MODIFIED Requirements
 

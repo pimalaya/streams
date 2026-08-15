@@ -19,7 +19,7 @@ One `impl Proxy` block: `from_url` and `connect` public, `from_env`, `bypasses` 
 
 `dial(host, port, &proxy)` becomes `proxy.connect(host, port)`, which is the verb the stream uses for the same act and reads in the order it happens.
 
-The type keeps its name. `Proxy` sits beside `Tls` as a configuration vocabulary of its own rather than a part of the stream, and neither needs the prefix that `StreamRetry` and the connect options carry for being the stream's own.
+The type keeps its name. `Proxy` sits beside `Tls` as a configuration vocabulary of its own, and the crate name plus the module path already say whose proxy it is.
 
 ## Cost
 

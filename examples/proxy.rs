@@ -14,7 +14,7 @@ use std::{env, error::Error, io::Read};
 
 use pimalaya_stream::{
     proxy::Proxy,
-    stream::{Stream, StreamTlsConnectOptions},
+    stream::{Stream, TlsConnectOptions},
     tls::Tls,
 };
 
@@ -31,7 +31,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         Err(_) => Proxy::System,
     };
 
-    let opts = StreamTlsConnectOptions {
+    let opts = TlsConnectOptions {
         tls: Tls::default(),
         proxy,
         ..Default::default()

@@ -18,7 +18,7 @@ use std::{
 };
 
 use pimalaya_stream::{
-    stream::{Stream, StreamTcpConnectOptions},
+    stream::{Stream, TcpConnectOptions},
     tls::Tls,
 };
 
@@ -29,7 +29,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let port: u16 = env::var("PORT").unwrap_or_else(|_| "587".into()).parse()?;
 
     let tls = Tls::default();
-    let opts = StreamTcpConnectOptions::default();
+    let opts = TcpConnectOptions::default();
     let mut stream = Stream::connect_tcp(&host, port, opts)?;
     let mut buf = [0u8; 4096];
 

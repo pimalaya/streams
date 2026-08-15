@@ -8,7 +8,7 @@
 //! A stream is opened by one of the `connect_*` methods, each taking the
 //! options its transport has and nothing more: a proxy where there is
 //! one to route through, TLS settings where there is a session to
-//! secure, and the [`StreamRetry`] strategy everywhere.
+//! secure, and the [`Retry`] strategy everywhere.
 //!
 //! That strategy is what reads and writes do when a socket reports it is
 //! not ready yet, and connecting arms the socket read deadline it
@@ -31,7 +31,7 @@ use log::{debug, trace};
 #[cfg(windows)]
 use uds_windows::UnixStream;
 
-use crate::{proxy::Proxy, retry::StreamRetry, tls::Tls};
+use crate::{proxy::Proxy, retry::Retry, tls::Tls};
 
 #[derive(Debug)]
 enum StreamKind {
@@ -88,13 +88,13 @@ pub struct Stream {
     /// What the stream does when a read or a write reports it is not
     /// ready, taken from the options it was opened with.
     ///
-    /// Assigning [`StreamRetry::Never`] is how a caller takes the
+    /// Assigning [`Retry::Never`] is how a caller takes the
     /// not-ready failures back mid-connection, which is what a watcher
-    /// entering IDLE does. Assigning a different [`StreamRetry::Until`]
+    /// entering IDLE does. Assigning a different [`Retry::Until`]
     /// changes the budget alone: the socket read deadline was armed at
     /// connect time, so a caller wanting a matching one calls
     /// [`set_read_timeout`](Self::set_read_timeout) beside it.
-    pub retry: StreamRetry,
+    pub retry: Retry,
 }
 
 impl Stream {
@@ -103,14 +103,14 @@ impl Stream {
     ///
     /// The arming is why this is not a struct literal at each connect: a
     /// budget cannot be spent against a socket that never returns, so
-    /// [`StreamRetry::Until`] is only enforceable with a deadline behind
+    /// [`Retry::Until`] is only enforceable with a deadline behind
     /// it, and a connect that forgot one would promise a budget it could
-    /// not keep. [`StreamRetry::Never`] arms nothing, a caller wanting
+    /// not keep. [`Retry::Never`] arms nothing, a caller wanting
     /// the not-ready failures being one that arms its own.
-    fn new(kind: StreamKind, host: String, retry: StreamRetry) -> Result<Self> {
+    fn new(kind: StreamKind, host: String, retry: Retry) -> Result<Self> {
         let stream = Self { kind, host, retry };
 
-        if let StreamRetry::Until(timeout) = retry {
+        if let Retry::Until(timeout) = retry {
             stream.set_read_timeout(Some(timeout))?;
         }
 
@@ -118,7 +118,7 @@ impl Stream {
     }
 
     /// Opens a Unix-domain socket at `path`.
-    pub fn connect_unix(path: impl AsRef<Path>, opts: StreamUnixConnectOptions) -> Result<Self> {
+    pub fn connect_unix(path: impl AsRef<Path>, opts: UnixConnectOptions) -> Result<Self> {
         debug!("connect unix stream");
         trace!("path: {}", path.as_ref().display());
 
@@ -130,11 +130,7 @@ impl Stream {
     }
 
     /// Opens a plain TCP connection to `host:port`.
-    pub fn connect_tcp(
-        host: impl ToString,
-        port: u16,
-        opts: StreamTcpConnectOptions,
-    ) -> Result<Self> {
+    pub fn connect_tcp(host: impl ToString, port: u16, opts: TcpConnectOptions) -> Result<Self> {
         let host = host.to_string();
 
         debug!("connect tcp stream");
@@ -148,11 +144,7 @@ impl Stream {
     }
 
     /// Opens a TCP connection and runs the TLS handshake (implicit TLS).
-    pub fn connect_tls(
-        host: impl ToString,
-        port: u16,
-        opts: StreamTlsConnectOptions,
-    ) -> Result<Self> {
+    pub fn connect_tls(host: impl ToString, port: u16, opts: TlsConnectOptions) -> Result<Self> {
         let host = host.to_string();
 
         debug!("connect tls stream");
@@ -339,7 +331,7 @@ impl Stream {
     /// Sets the read timeout on the underlying socket; `None` blocks
     /// forever.
     ///
-    /// Under [`StreamRetry::Until`] this is the pace at which a stalled
+    /// Under [`Retry::Until`] this is the pace at which a stalled
     /// read wakes up to check the budget, not the deadline the caller
     /// sees: a shorter timeout than the budget only means more wakeups.
     pub fn set_read_timeout(&self, timeout: Option<Duration>) -> io::Result<()> {
@@ -358,7 +350,7 @@ impl Stream {
     /// writes surface `WouldBlock` reliably (unlike a read timeout, which
     /// the TLS layer does not always propagate).
     ///
-    /// Non-blocking mode wants [`StreamRetry::Never`] beside it: the two
+    /// Non-blocking mode wants [`Retry::Never`] beside it: the two
     /// settings are contradictory, a caller reaching for non-blocking
     /// mode wanting those `WouldBlock` failures that a retry strategy
     /// would spend its whole budget hiding.
@@ -375,7 +367,7 @@ impl Stream {
 }
 
 impl Read for Stream {
-    /// Reads under the stream's [`StreamRetry`] strategy: a socket
+    /// Reads under the stream's [`Retry`] strategy: a socket
     /// reporting it is not ready costs an attempt, not the exchange.
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         self.retry(|stream| stream.kind.read_once(buf))
@@ -383,7 +375,7 @@ impl Read for Stream {
 }
 
 impl Write for Stream {
-    /// Writes under the stream's [`StreamRetry`] strategy, which is what
+    /// Writes under the stream's [`Retry`] strategy, which is what
     /// makes the `write_all` built on top of it survive a socket that is
     /// momentarily full.
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
@@ -397,29 +389,29 @@ impl Write for Stream {
 
 /// Options for [`Stream::connect_unix`].
 #[derive(Clone, Debug, Default)]
-pub struct StreamUnixConnectOptions {
+pub struct UnixConnectOptions {
     /// What the stream does when a read or a write reports it is not
-    /// ready. Defaults to [`StreamRetry::default`].
+    /// ready. Defaults to [`Retry::default`].
     ///
     /// A local socket has neither a proxy nor a TLS session to
     /// configure, which is why this is the whole of it.
-    pub retry: StreamRetry,
+    pub retry: Retry,
 }
 
 /// Options for [`Stream::connect_tcp`].
 #[derive(Clone, Debug, Default)]
-pub struct StreamTcpConnectOptions {
+pub struct TcpConnectOptions {
     /// How the connection reaches its target. Defaults to
     /// [`Proxy::System`], resolved from the environment at connect time.
     pub proxy: Proxy,
     /// What the stream does when a read or a write reports it is not
-    /// ready. Defaults to [`StreamRetry::default`].
-    pub retry: StreamRetry,
+    /// ready. Defaults to [`Retry::default`].
+    pub retry: Retry,
 }
 
 /// Options for [`Stream::connect_tls`].
 #[derive(Clone, Debug, Default)]
-pub struct StreamTlsConnectOptions {
+pub struct TlsConnectOptions {
     /// How the session is secured: provider, crypto, ALPN, an extra
     /// certificate to trust.
     pub tls: Tls,
@@ -427,8 +419,8 @@ pub struct StreamTlsConnectOptions {
     /// [`Proxy::System`], resolved from the environment at connect time.
     pub proxy: Proxy,
     /// What the stream does when a read or a write reports it is not
-    /// ready. Defaults to [`StreamRetry::default`].
-    pub retry: StreamRetry,
+    /// ready. Defaults to [`Retry::default`].
+    pub retry: Retry,
 }
 
 /// Certificate pinning for the rustls TLS branch.

@@ -1,6 +1,6 @@
 //! What a stream does when a socket is not ready yet.
 //!
-//! [`StreamRetry`] is the strategy a stream is opened with, and the
+//! [`Retry`] is the strategy a stream is opened with, and the
 //! loop honoring it lives beside it here, as the `retry` method every
 //! read, write and flush goes through. The strategy is data saying how
 //! long to keep asking; running the operation belongs to the stream,
@@ -15,9 +15,9 @@ use log::debug;
 
 use crate::stream::Stream;
 
-/// How long [`StreamRetry::default`] keeps retrying a stream that is
+/// How long [`Retry::default`] keeps retrying a stream that is
 /// not ready.
-pub const DEFAULT_RETRY_TIMEOUT: Duration = Duration::from_secs(60);
+pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(60);
 
 /// Pause before the first retry, doubled on each further one up to
 /// [`RETRY_BACKOFF_MAX`].
@@ -37,7 +37,7 @@ const RETRY_BACKOFF_MAX: Duration = Duration::from_millis(250);
 /// says the session is over, so a strategy says how long to keep asking
 /// before it is called one.
 #[derive(Clone, Copy, Debug)]
-pub enum StreamRetry {
+pub enum Retry {
     /// Hands every failure back to the caller, untouched.
     ///
     /// For a loop that wants the not-ready failures: a watcher polling
@@ -56,16 +56,16 @@ pub enum StreamRetry {
     Until(Duration),
 }
 
-impl Default for StreamRetry {
-    /// Retries for [`DEFAULT_RETRY_TIMEOUT`].
+impl Default for Retry {
+    /// Retries for [`DEFAULT_TIMEOUT`].
     fn default() -> Self {
-        Self::Until(DEFAULT_RETRY_TIMEOUT)
+        Self::Until(DEFAULT_TIMEOUT)
     }
 }
 
 impl Stream {
     /// Attempts `op` until it succeeds, fails for a reason other than
-    /// "not ready yet", or this stream's [`StreamRetry`] runs out.
+    /// "not ready yet", or this stream's [`Retry`] runs out.
     ///
     /// The one place a strategy is honored, shared by the read, the
     /// write and the flush so none of them can drift from the other two.
@@ -76,7 +76,7 @@ impl Stream {
         &mut self,
         mut op: impl FnMut(&mut Self) -> io::Result<T>,
     ) -> io::Result<T> {
-        let StreamRetry::Until(timeout) = self.retry else {
+        let Retry::Until(timeout) = self.retry else {
             return op(self);
         };
 

@@ -19,7 +19,7 @@ Fixing it in io-imap alone would have left it in place everywhere else. io-smtp 
 
 Put the policy in the transport, inside `Read` and `Write` on `Stream`, so no consumer has to call anything to get it.
 
-- A `StreamRetry` strategy on the stream: `Never` hands failures back untouched, `Until(Duration)` retries until that long passes without progress. Default one minute.
+- A `Retry` strategy on the stream: `Never` hands failures back untouched, `Until(Duration)` retries until that long passes without progress. Default one minute.
 - `Read`, `Write` and `flush` honor it. `EAGAIN`, `EINTR` and the Windows spelling of an expired deadline are retried with a small growing pause; everything else is handed back. Exhausting the budget yields `TimedOut` with a message, never a raw errno.
 - Selecting `Until` arms the socket read deadline to the same value, without which the budget is unenforceable against a server that goes silent.
 - `set_nonblocking(true)` drops the strategy to `Never`, the two settings being contradictory.

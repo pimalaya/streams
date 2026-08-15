@@ -15,7 +15,7 @@ use std::{
 };
 
 use pimalaya_stream::{
-    stream::{Stream, StreamTlsConnectOptions},
+    stream::{Stream, TlsConnectOptions},
     tls::Tls,
 };
 
@@ -28,7 +28,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     // NOTE: the defaults pick the first enabled provider and the
     // platform trust anchors, `alpn` and `cert` being what a protocol
     // client usually sets
-    let opts = StreamTlsConnectOptions {
+    let opts = TlsConnectOptions {
         tls: Tls::default(),
         ..Default::default()
     };

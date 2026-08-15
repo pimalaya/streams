@@ -6,7 +6,7 @@ landed: 2026-08-15
 
 # One way to open a stream, with options per transport
 
-Opening a stream had four entry points for one job: three `connect_*` constructors, a `builder()` with a setter per field, a private `open()` behind both and a private `armed()` behind that. Threading the retry strategy through all four is what made the duplication plain. It is now one `connect_*` method per transport, each taking an options struct of public fields, `StreamTcpConnectOptions { proxy, retry }`, `StreamTlsConnectOptions { tls, proxy, retry }` and `StreamUnixConnectOptions { retry }`, each holding what its transport has and nothing more.
+Opening a stream had four entry points for one job: three `connect_*` constructors, a `builder()` with a setter per field, a private `open()` behind both and a private `armed()` behind that. Threading the retry strategy through all four is what made the duplication plain. It is now one `connect_*` method per transport, each taking an options struct of public fields, `TcpConnectOptions { proxy, retry }`, `TlsConnectOptions { tls, proxy, retry }` and `UnixConnectOptions { retry }`, each holding what its transport has and nothing more.
 
 The builder is gone, and so is the vocabulary it introduced. Nothing else in Pimalaya configures a call with chained setters: a command takes an options struct, which is the shape a consumer already meets in `ImapSessionOpenOptions` and its siblings. `open` and `armed` are gone with it, leaving a private `new` that builds the handle and arms the read deadline, the one thing every path must do.
 

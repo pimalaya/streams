@@ -13,7 +13,7 @@ The stream module had grown a second subject. Beside the transport it exists for
 
 ## What
 
-A `retry` module holding everything that answers "what does a stream do when the socket is not ready yet": `StreamRetry`, `DEFAULT_RETRY_TIMEOUT`, the backoff bounds, and the loop itself.
+A `retry` module holding everything that answers "what does a stream do when the socket is not ready yet": `Retry`, `DEFAULT_TIMEOUT`, the backoff bounds, and the loop itself.
 
 The loop stays a method on `Stream`, since running an operation is the stream's job and not the strategy's, but it is written in the retry module now, as an `impl Stream` block over there. Its `op` takes the stream back rather than the socket, which is what lets it live outside the module the socket is private to.
 
@@ -21,4 +21,4 @@ The tests followed: tests/retry.rs was already the retry file, and now names the
 
 ## Cost
 
-`StreamRetry` and `DEFAULT_RETRY_TIMEOUT` move one module across for consumers, from `stream` to `retry`.
+`Retry` and `DEFAULT_TIMEOUT` move one module across for consumers, from `stream` to `retry`.

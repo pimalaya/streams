@@ -17,11 +17,11 @@ The builder also had the wrong shape for this repository. Nothing else in Pimala
 
 One options struct per transport, each holding what that transport actually has, and one `connect_*` method per transport taking it.
 
-- `StreamTcpConnectOptions { proxy, retry }`, `StreamTlsConnectOptions { tls, proxy, retry }`, `StreamUnixConnectOptions { retry }`, all public fields with `Default`.
+- `TcpConnectOptions { proxy, retry }`, `TlsConnectOptions { tls, proxy, retry }`, `UnixConnectOptions { retry }`, all public fields with `Default`.
 - `connect_tcp`, `connect_tls` and `connect_unix` each take theirs by value. `upgrade_tls` keeps its bare `&Tls`: a proxy means nothing once the socket is open, and the strategy comes from the stream being consumed.
 - `StreamBuilder`, `StreamStd::builder`, `open` and `armed` are gone. A private `new` builds the handle and arms the deadline, which is the only thing every path must do.
 - `retry` becomes a public field on `Stream`, replacing `set_retry`. The one mid-connection switch that exists in the org is to `Never`, which arms nothing, so a setter that quietly re-armed the socket bought nothing and could clobber a deadline the caller had set.
-- `set_nonblocking` goes back to `&self` and stops mutating the strategy. With `retry` public, a caller writes `stream.retry = StreamRetry::Never` beside it, in one visible line, rather than having it done behind its back.
+- `set_nonblocking` goes back to `&self` and stops mutating the strategy. With `retry` public, a caller writes `stream.retry = Retry::Never` beside it, in one visible line, rather than having it done behind its back.
 - `StreamStd` becomes `Stream` and the private enum behind it becomes `StreamKind`. The module already says which transport this is, so the type was repeating it; the enum is a kind, and now says so.
 - One `impl` block instead of three, public surface first and the private helpers under it.
 

@@ -21,15 +21,15 @@ Every path SHALL end in the same private constructor, the one place that builds 
 
 ### Requirement: The deadline the strategy arms
 
-Connecting with `StreamRetry::Until(d)` SHALL arm the socket read deadline to `d`. Without it the budget is not enforceable: a server that goes silent on an otherwise healthy connection blocks the caller in `read` forever.
+Connecting with `Retry::Until(d)` SHALL arm the socket read deadline to `d`. Without it the budget is not enforceable: a server that goes silent on an otherwise healthy connection blocks the caller in `read` forever.
 
-`StreamRetry::Never` SHALL arm nothing, a caller asking for the not-ready failures being one that arms its own deadline. A caller MAY arm a shorter deadline than its budget, which only means more wakeups.
+`Retry::Never` SHALL arm nothing, a caller asking for the not-ready failures being one that arms its own deadline. A caller MAY arm a shorter deadline than its budget, which only means more wakeups.
 
 The strategy SHALL be readable and assignable on a live stream. Assigning `Never` is how a caller takes the not-ready failures back mid-connection; assigning a different `Until` changes the budget alone, the deadline having been armed at connect time, so a caller wanting a matching one sets it beside.
 
 ### Requirement: Non-blocking mode
 
-Non-blocking mode SHALL be a plain socket toggle. It contradicts a retrying strategy, a caller reaching for it wanting the `WouldBlock` failures that a strategy would spend its whole budget hiding, so such a caller SHALL assign `StreamRetry::Never` beside it.
+Non-blocking mode SHALL be a plain socket toggle. It contradicts a retrying strategy, a caller reaching for it wanting the `WouldBlock` failures that a strategy would spend its whole budget hiding, so such a caller SHALL assign `Retry::Never` beside it.
 
 ## REMOVED Requirements
 

@@ -12,7 +12,7 @@ What a stream does when a read or a write reports it is not ready. A blocking so
 
 A stream SHALL carry a retry strategy, and `Read` and `Write` SHALL honor it. No method of its own SHALL be exposed for it: a caller picks the strategy, and every read, write and flush it already writes behaves accordingly.
 
-`StreamRetry::Never` SHALL hand every failure back untouched. `StreamRetry::Until(d)` SHALL retry until `d` passes without the stream making progress. A stream SHALL open on the default strategy, which retries for one minute.
+`Retry::Never` SHALL hand every failure back untouched. `Retry::Until(d)` SHALL retry until `d` passes without the stream making progress. A stream SHALL open on the default strategy, which retries for one minute.
 
 #### Scenario: A protocol crate that knows nothing about this
 - GIVEN a client looping over a coroutine, reading and writing the stream it was handed
@@ -41,9 +41,9 @@ Exhausting the budget SHALL fail with `TimedOut` and a message naming the elapse
 
 ### Requirement: The deadline the strategy arms
 
-Connecting with `StreamRetry::Until(d)` SHALL arm the socket read deadline to `d`. Without it the budget is not enforceable: a server that goes silent on an otherwise healthy connection blocks the caller in `read` forever.
+Connecting with `Retry::Until(d)` SHALL arm the socket read deadline to `d`. Without it the budget is not enforceable: a server that goes silent on an otherwise healthy connection blocks the caller in `read` forever.
 
-`StreamRetry::Never` SHALL arm nothing, a caller asking for the not-ready failures being one that arms its own deadline. A caller MAY arm a shorter deadline than its budget, which only means more wakeups.
+`Retry::Never` SHALL arm nothing, a caller asking for the not-ready failures being one that arms its own deadline. A caller MAY arm a shorter deadline than its budget, which only means more wakeups.
 
 The strategy SHALL be readable and assignable on a live stream. Assigning `Never` is how a caller takes the not-ready failures back mid-connection; assigning a different `Until` changes the budget alone, the deadline having been armed at connect time, so a caller wanting a matching one sets it beside.
 
@@ -54,4 +54,4 @@ The strategy SHALL be readable and assignable on a live stream. Assigning `Never
 
 ### Requirement: Non-blocking mode
 
-Non-blocking mode SHALL be a plain socket toggle. It contradicts a retrying strategy, a caller reaching for it wanting the `WouldBlock` failures that a strategy would spend its whole budget hiding, so such a caller SHALL assign `StreamRetry::Never` beside it.
+Non-blocking mode SHALL be a plain socket toggle. It contradicts a retrying strategy, a caller reaching for it wanting the `WouldBlock` failures that a strategy would spend its whole budget hiding, so such a caller SHALL assign `Retry::Never` beside it.

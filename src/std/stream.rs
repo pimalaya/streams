@@ -1,9 +1,20 @@
 //! Blocking std transport handle.
 //!
-//! [`StreamStd`] is a single `Read + Write` type wrapping a TCP socket, a
+//! [`Stream`] is a single `Read + Write` type wrapping a TCP socket, a
 //! Unix-domain socket or a TLS session (`rustls` or `native-tls`). TLS
 //! options (provider, crypto, ALPN, a pinned certificate) come from
 //! [`Tls`].
+//!
+//! A stream is opened by one of the `connect_*` methods, each taking the
+//! options its transport has and nothing more: a proxy where there is
+//! one to route through, TLS settings where there is a session to
+//! secure, and the retry strategy everywhere.
+//!
+//! That strategy is what reads and writes do when a socket reports it is
+//! not ready yet, which is not the same as broken, though every protocol
+//! crate above was ending its exchange on it. `Read` and `Write` honor
+//! it without a method of their own, and connecting arms the socket read
+//! deadline it implies, which is what makes it enforceable.
 //!
 //! [`Tls`]: crate::tls::Tls
 
@@ -13,7 +24,8 @@ use std::{
     io::{self, Read, Write},
     net::TcpStream,
     path::Path,
-    time::Duration,
+    thread,
+    time::{Duration, Instant},
 };
 
 use anyhow::{Result, bail};
@@ -26,8 +38,22 @@ use crate::{
     tls::Tls,
 };
 
+/// How long [`StreamRetry::default`] keeps retrying a stream that is
+/// not ready.
+pub const DEFAULT_RETRY_TIMEOUT: Duration = Duration::from_secs(60);
+
+/// Pause before the first retry, doubled on each further one up to
+/// [`RETRY_BACKOFF_MAX`].
+///
+/// It only comes into play when the stream reports not-ready without
+/// having waited, a socket read deadline being what otherwise paces the
+/// attempts.
+const RETRY_BACKOFF_MIN: Duration = Duration::from_millis(1);
+/// Longest pause between two retries.
+const RETRY_BACKOFF_MAX: Duration = Duration::from_millis(250);
+
 #[derive(Debug)]
-enum Stream {
+enum StreamKind {
     Tcp(TcpStream),
     Unix(UnixStream),
     #[cfg(any(feature = "rustls-aws", feature = "rustls-ring"))]
@@ -36,112 +62,223 @@ enum Stream {
     NativeTls(native_tls::TlsStream<TcpStream>),
 }
 
+/// The raw I/O, one attempt per call, under whichever variant is open.
+impl StreamKind {
+    fn read_once(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        match self {
+            StreamKind::Tcp(s) => s.read(buf),
+            StreamKind::Unix(s) => s.read(buf),
+            #[cfg(any(feature = "rustls-aws", feature = "rustls-ring"))]
+            StreamKind::Rustls(s) => s.read(buf),
+            #[cfg(feature = "native-tls")]
+            StreamKind::NativeTls(s) => s.read(buf),
+        }
+    }
+
+    fn write_once(&mut self, buf: &[u8]) -> io::Result<usize> {
+        match self {
+            StreamKind::Tcp(s) => s.write(buf),
+            StreamKind::Unix(s) => s.write(buf),
+            #[cfg(any(feature = "rustls-aws", feature = "rustls-ring"))]
+            StreamKind::Rustls(s) => s.write(buf),
+            #[cfg(feature = "native-tls")]
+            StreamKind::NativeTls(s) => s.write(buf),
+        }
+    }
+
+    fn flush_once(&mut self) -> io::Result<()> {
+        match self {
+            StreamKind::Tcp(s) => s.flush(),
+            StreamKind::Unix(s) => s.flush(),
+            #[cfg(any(feature = "rustls-aws", feature = "rustls-ring"))]
+            StreamKind::Rustls(s) => s.flush(),
+            #[cfg(feature = "native-tls")]
+            StreamKind::NativeTls(s) => s.flush(),
+        }
+    }
+}
+
+/// What a stream does when a read or a write reports it is not ready.
+///
+/// A blocking socket is not supposed to report `EAGAIN`, yet callers do
+/// see one surface mid-exchange (macOS especially), and any socket
+/// carrying a read deadline reports its expiry the same way. Neither
+/// says the session is over, so a strategy says how long to keep asking
+/// before it is called one.
+#[derive(Clone, Copy, Debug)]
+pub enum StreamRetry {
+    /// Hands every failure back to the caller, untouched.
+    ///
+    /// For a loop that wants the not-ready failures: a watcher polling
+    /// a shutdown flag between IDLE keep-alives, a socket driven from a
+    /// poller. Such a caller arms its own read deadline, and connecting
+    /// with this strategy arms none.
+    Never,
+    /// Retries until this long passes without the stream making
+    /// progress, then fails with `TimedOut` and a message saying so.
+    ///
+    /// Each read and each write gets its own budget, so a slow but
+    /// progressing transfer never runs out. Connecting with it arms the
+    /// socket read deadline to the same value, without which a server
+    /// that goes silent would block the caller rather than run the
+    /// budget down.
+    Until(Duration),
+}
+
+impl Default for StreamRetry {
+    /// Retries for [`DEFAULT_RETRY_TIMEOUT`].
+    fn default() -> Self {
+        Self::Until(DEFAULT_RETRY_TIMEOUT)
+    }
+}
+
+/// Options for [`Stream::connect_tcp`].
+#[derive(Clone, Debug, Default)]
+pub struct StreamTcpConnectOptions {
+    /// How the connection reaches its target. Defaults to
+    /// [`Proxy::System`], resolved from the environment at dial time.
+    pub proxy: Proxy,
+    /// What the stream does when a read or a write reports it is not
+    /// ready. Defaults to [`StreamRetry::default`].
+    pub retry: StreamRetry,
+}
+
+/// Options for [`Stream::connect_tls`].
+#[derive(Clone, Debug, Default)]
+pub struct StreamTlsConnectOptions {
+    /// How the session is secured: provider, crypto, ALPN, an extra
+    /// certificate to trust.
+    pub tls: Tls,
+    /// How the connection reaches its target. Defaults to
+    /// [`Proxy::System`], resolved from the environment at dial time.
+    pub proxy: Proxy,
+    /// What the stream does when a read or a write reports it is not
+    /// ready. Defaults to [`StreamRetry::default`].
+    pub retry: StreamRetry,
+}
+
+/// Options for [`Stream::connect_unix`].
+#[derive(Clone, Debug, Default)]
+pub struct StreamUnixConnectOptions {
+    /// What the stream does when a read or a write reports it is not
+    /// ready. Defaults to [`StreamRetry::default`].
+    ///
+    /// A local socket has neither a proxy nor a TLS session to
+    /// configure, which is why this is the whole of it.
+    pub retry: StreamRetry,
+}
+
 /// Blocking transport handle: TCP, Unix-domain or TLS, behind one
 /// `Read + Write`.
 #[derive(Debug)]
-pub struct StreamStd {
-    inner: Stream,
+pub struct Stream {
+    kind: StreamKind,
     host: String,
+    /// What the stream does when a read or a write reports it is not
+    /// ready, taken from the options it was opened with.
+    ///
+    /// Assigning [`StreamRetry::Never`] is how a caller takes the
+    /// not-ready failures back mid-connection, which is what a watcher
+    /// entering IDLE does. Assigning a different [`StreamRetry::Until`]
+    /// changes the budget alone: the socket read deadline was armed at
+    /// connect time, so a caller wanting a matching one calls
+    /// [`set_read_timeout`](Self::set_read_timeout) beside it.
+    pub retry: StreamRetry,
 }
 
-impl StreamStd {
+impl Stream {
+    /// Wraps `kind` in the handle and arms the socket read deadline
+    /// `retry` implies, the one way a stream comes into existence.
+    ///
+    /// The arming is why this is not a struct literal at each connect: a
+    /// budget cannot be spent against a socket that never returns, so
+    /// [`StreamRetry::Until`] is only enforceable with a deadline behind
+    /// it, and a connect that forgot one would promise a budget it could
+    /// not keep. [`StreamRetry::Never`] arms nothing, a caller wanting
+    /// the not-ready failures being one that arms its own.
+    fn new(kind: StreamKind, host: String, retry: StreamRetry) -> Result<Self> {
+        let stream = Self { kind, host, retry };
+
+        if let StreamRetry::Until(timeout) = retry {
+            stream.set_read_timeout(Some(timeout))?;
+        }
+
+        Ok(stream)
+    }
+
     /// Opens a Unix-domain socket at `path`.
-    pub fn connect_unix<P: AsRef<Path>>(path: P) -> Result<StreamStd> {
+    pub fn connect_unix(path: impl AsRef<Path>, opts: StreamUnixConnectOptions) -> Result<Self> {
         debug!("connect unix stream");
         trace!("path: {}", path.as_ref().display());
 
-        let inner = Stream::Unix(UnixStream::connect(path)?);
+        let kind = StreamKind::Unix(UnixStream::connect(path)?);
         let host = String::from("127.0.0.1");
 
         debug!("unix stream connected");
-        Ok(Self { inner, host })
+        Self::new(kind, host, opts.retry)
     }
 
     /// Opens a plain TCP connection to `host:port`.
-    ///
-    /// Routed through the ambient proxy ([`Proxy::System`]); use
-    /// [`StreamStd::builder`] to select a proxy explicitly.
-    pub fn connect_tcp(host: impl ToString, port: u16) -> Result<StreamStd> {
+    pub fn connect_tcp(
+        host: impl ToString,
+        port: u16,
+        opts: StreamTcpConnectOptions,
+    ) -> Result<Self> {
         let host = host.to_string();
 
         debug!("connect tcp stream");
         trace!("host: {host}");
         trace!("port: {port}");
 
-        Self::open(host, port, None, &Proxy::System)
+        let tcp = dial(&host, port, &opts.proxy)?;
+
+        debug!("tcp stream connected");
+        Self::new(StreamKind::Tcp(tcp), host, opts.retry)
     }
 
     /// Opens a TCP connection and runs the TLS handshake (implicit TLS).
-    ///
-    /// Routed through the ambient proxy ([`Proxy::System`]); use
-    /// [`StreamStd::builder`] to select a proxy explicitly.
-    pub fn connect_tls(host: impl ToString, port: u16, tls: &Tls) -> Result<StreamStd> {
+    pub fn connect_tls(
+        host: impl ToString,
+        port: u16,
+        opts: StreamTlsConnectOptions,
+    ) -> Result<Self> {
         let host = host.to_string();
 
         debug!("connect tls stream");
         trace!("host: {host}");
         trace!("port: {port}");
 
-        Self::open(host, port, Some(tls), &Proxy::System)
-    }
+        let tcp = dial(&host, port, &opts.proxy)?;
+        let kind = Self::_upgrade_tls(&host, tcp, &opts.tls)?;
 
-    /// Starts building a TCP connection to `host:port`, optionally wrapped
-    /// in implicit TLS and/or routed through a chosen proxy. Terminates
-    /// with [`StreamBuilder::connect`].
-    ///
-    /// The plain constructors ([`connect_tcp`](Self::connect_tcp),
-    /// [`connect_tls`](Self::connect_tls)) are shorthands for this with the
-    /// default [`Proxy::System`]; reach for the builder when a call site
-    /// needs to override the proxy from its own configuration.
-    pub fn builder(host: impl ToString, port: u16) -> StreamBuilder {
-        StreamBuilder {
-            host: host.to_string(),
-            port,
-            tls: None,
-            proxy: Proxy::System,
-        }
-    }
-
-    /// Dials `host:port` through `proxy`, optionally upgrading to implicit
-    /// TLS. The single connect path shared by the constructors and the
-    /// builder.
-    fn open(host: String, port: u16, tls: Option<&Tls>, proxy: &Proxy) -> Result<StreamStd> {
-        let tcp = dial(&host, port, proxy)?;
-
-        match tls {
-            Some(tls) => Self::_upgrade_tls(host, tcp, tls),
-            None => {
-                debug!("tcp stream connected");
-                Ok(Self {
-                    inner: Stream::Tcp(tcp),
-                    host,
-                })
-            }
-        }
+        Self::new(kind, host, opts.retry)
     }
 
     /// Wraps a plain TCP stream in a TLS session (STARTTLS upgrade).
     ///
     /// Fails on Unix-domain or already-TLS variants.
-    pub fn upgrade_tls(self, tls: &Tls) -> Result<StreamStd> {
-        match self.inner {
-            Stream::Tcp(tcp) => {
+    pub fn upgrade_tls(self, tls: &Tls) -> Result<Self> {
+        match self.kind {
+            StreamKind::Tcp(tcp) => {
                 debug!("upgrade tcp stream to tls");
                 trace!("host: {}", self.host);
-                Self::_upgrade_tls(self.host, tcp, tls)
+
+                let kind = Self::_upgrade_tls(&self.host, tcp, tls)?;
+
+                Self::new(kind, self.host, self.retry)
             }
-            Stream::Unix(_) => bail!("cannot upgrade Unix-domain stream to TLS"),
+            StreamKind::Unix(_) => bail!("cannot upgrade Unix-domain stream to TLS"),
             #[cfg(any(feature = "rustls-aws", feature = "rustls-ring"))]
-            Stream::Rustls(_) => bail!("stream is already wrapped in rustls"),
+            StreamKind::Rustls(_) => bail!("stream is already wrapped in rustls"),
             #[cfg(feature = "native-tls")]
-            Stream::NativeTls(_) => bail!("stream is already wrapped in native-tls"),
+            StreamKind::NativeTls(_) => bail!("stream is already wrapped in native-tls"),
         }
     }
 
     #[cfg(not(feature = "rustls-aws"))]
     #[cfg(not(feature = "rustls-ring"))]
     #[cfg(not(feature = "native-tls"))]
-    fn _upgrade_tls(_: String, _: TcpStream, _: &Tls) -> Result<StreamStd> {
+    fn _upgrade_tls(_: &str, _: TcpStream, _: &Tls) -> Result<StreamKind> {
         bail!("missing cargo feature: `rustls-aws`, `rustls-ring` or `native-tls`")
     }
 
@@ -150,7 +287,7 @@ impl StreamStd {
         feature = "rustls-ring",
         feature = "native-tls"
     ))]
-    fn _upgrade_tls(host: String, tcp: TcpStream, tls: &Tls) -> Result<StreamStd> {
+    fn _upgrade_tls(host: &str, tcp: TcpStream, tls: &Tls) -> Result<StreamKind> {
         use crate::tls::TlsProvider;
 
         let provider = match &tls.provider {
@@ -252,10 +389,9 @@ impl StreamStd {
 
                 let server_name = host.to_string().try_into()?;
                 let conn = ClientConnection::new(Arc::new(config), server_name)?;
-                let inner = Stream::Rustls(StreamOwned::new(conn, tcp));
 
                 debug!("tls stream connected");
-                Ok(StreamStd { inner, host })
+                Ok(StreamKind::Rustls(StreamOwned::new(conn, tcp)))
             }
 
             #[cfg(feature = "native-tls")]
@@ -276,10 +412,10 @@ impl StreamStd {
                 }
 
                 let connector = builder.build()?;
-                let inner = Stream::NativeTls(connector.connect(host.as_str(), tcp)?);
+                let session = connector.connect(host, tcp)?;
 
                 debug!("tls stream connected");
-                Ok(StreamStd { inner, host })
+                Ok(StreamKind::NativeTls(session))
             }
 
             // NOTE: every provider is matched above; the pattern only
@@ -288,95 +424,66 @@ impl StreamStd {
             _ => unreachable!(),
         }
     }
-}
 
-/// Builder for [`StreamStd`]: the proxy-aware connect entry point.
-///
-/// Created by [`StreamStd::builder`]. Set implicit TLS with [`tls`](Self::tls)
-/// and/or a proxy with [`proxy`](Self::proxy), then open the connection with
-/// the terminal [`connect`](Self::connect).
-#[derive(Debug)]
-pub struct StreamBuilder {
-    host: String,
-    port: u16,
-    tls: Option<Tls>,
-    proxy: Proxy,
-}
+    /// Attempts `op` until it succeeds, fails for a reason other than
+    /// "not ready yet", or this stream's [`StreamRetry`] runs out.
+    ///
+    /// The one place a strategy is honored, shared by the read, the
+    /// write and the flush so none of them can drift from the other two.
+    fn retry<T>(&mut self, mut op: impl FnMut(&mut StreamKind) -> io::Result<T>) -> io::Result<T> {
+        let StreamRetry::Until(timeout) = self.retry else {
+            return op(&mut self.kind);
+        };
 
-impl StreamBuilder {
-    /// Runs an implicit-TLS handshake once connected (omit for plaintext
-    /// or a later STARTTLS [`upgrade_tls`](StreamStd::upgrade_tls)).
-    pub fn tls(mut self, tls: Tls) -> Self {
-        self.tls = Some(tls);
-        self
-    }
+        let start = Instant::now();
+        let mut backoff = RETRY_BACKOFF_MIN;
+        let mut retries = 0usize;
 
-    /// Selects the proxy. Defaults to [`Proxy::System`] (resolved from the
-    /// environment at connect time).
-    pub fn proxy(mut self, proxy: Proxy) -> Self {
-        self.proxy = proxy;
-        self
-    }
+        loop {
+            let err = match op(&mut self.kind) {
+                Err(err) if err.kind() == io::ErrorKind::Interrupted => continue,
+                Err(err) if matches!(err.kind(), io::ErrorKind::TimedOut) => err,
+                Err(err) if matches!(err.kind(), io::ErrorKind::WouldBlock) => err,
+                Err(err) => return Err(err),
+                Ok(out) => {
+                    if retries > 0 {
+                        debug!("stream ready again after {retries} retries");
+                    }
+                    return Ok(out);
+                }
+            };
 
-    /// Opens the connection (blocking). Terminal.
-    pub fn connect(self) -> Result<StreamStd> {
-        debug!("connect stream");
-        trace!("host: {}", self.host);
-        trace!("port: {}", self.port);
+            if start.elapsed() >= timeout {
+                debug!("give up on stream after {retries} retries: {err}");
+                let kind = io::ErrorKind::TimedOut;
+                let msg = format!("stream stopped responding after {timeout:?}");
+                return Err(io::Error::new(kind, msg));
+            }
 
-        StreamStd::open(self.host, self.port, self.tls.as_ref(), &self.proxy)
-    }
-}
+            let kind = err.kind();
+            let errno = err.raw_os_error();
+            debug!("retry stream after transient {kind:?} failure (errno {errno:?}): {err}");
 
-impl Read for StreamStd {
-    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-        match &mut self.inner {
-            Stream::Tcp(s) => s.read(buf),
-            Stream::Unix(s) => s.read(buf),
-            #[cfg(any(feature = "rustls-aws", feature = "rustls-ring"))]
-            Stream::Rustls(s) => s.read(buf),
-            #[cfg(feature = "native-tls")]
-            Stream::NativeTls(s) => s.read(buf),
-        }
-    }
-}
-
-impl Write for StreamStd {
-    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        match &mut self.inner {
-            Stream::Tcp(s) => s.write(buf),
-            Stream::Unix(s) => s.write(buf),
-            #[cfg(any(feature = "rustls-aws", feature = "rustls-ring"))]
-            Stream::Rustls(s) => s.write(buf),
-            #[cfg(feature = "native-tls")]
-            Stream::NativeTls(s) => s.write(buf),
+            thread::sleep(backoff);
+            backoff = (backoff * 2).min(RETRY_BACKOFF_MAX);
+            retries += 1;
         }
     }
 
-    fn flush(&mut self) -> io::Result<()> {
-        match &mut self.inner {
-            Stream::Tcp(s) => s.flush(),
-            Stream::Unix(s) => s.flush(),
-            #[cfg(any(feature = "rustls-aws", feature = "rustls-ring"))]
-            Stream::Rustls(s) => s.flush(),
-            #[cfg(feature = "native-tls")]
-            Stream::NativeTls(s) => s.flush(),
-        }
-    }
-}
-
-/// Socket-level tuning shared by every variant.
-impl StreamStd {
     /// Sets the read timeout on the underlying socket; `None` blocks
     /// forever.
+    ///
+    /// Under [`StreamRetry::Until`] this is the pace at which a stalled
+    /// read wakes up to check the budget, not the deadline the caller
+    /// sees: a shorter timeout than the budget only means more wakeups.
     pub fn set_read_timeout(&self, timeout: Option<Duration>) -> io::Result<()> {
-        match &self.inner {
-            Stream::Tcp(s) => s.set_read_timeout(timeout),
-            Stream::Unix(s) => s.set_read_timeout(timeout),
+        match &self.kind {
+            StreamKind::Tcp(s) => s.set_read_timeout(timeout),
+            StreamKind::Unix(s) => s.set_read_timeout(timeout),
             #[cfg(any(feature = "rustls-aws", feature = "rustls-ring"))]
-            Stream::Rustls(s) => s.sock.set_read_timeout(timeout),
+            StreamKind::Rustls(s) => s.sock.set_read_timeout(timeout),
             #[cfg(feature = "native-tls")]
-            Stream::NativeTls(s) => s.get_ref().set_read_timeout(timeout),
+            StreamKind::NativeTls(s) => s.get_ref().set_read_timeout(timeout),
         }
     }
 
@@ -384,15 +491,41 @@ impl StreamStd {
     /// variant it applies to the socket beneath the session, so reads and
     /// writes surface `WouldBlock` reliably (unlike a read timeout, which
     /// the TLS layer does not always propagate).
+    ///
+    /// Non-blocking mode wants [`StreamRetry::Never`] beside it: the two
+    /// settings are contradictory, a caller reaching for non-blocking
+    /// mode wanting those `WouldBlock` failures that a retry strategy
+    /// would spend its whole budget hiding.
     pub fn set_nonblocking(&self, nonblocking: bool) -> io::Result<()> {
-        match &self.inner {
-            Stream::Tcp(s) => s.set_nonblocking(nonblocking),
-            Stream::Unix(s) => s.set_nonblocking(nonblocking),
+        match &self.kind {
+            StreamKind::Tcp(s) => s.set_nonblocking(nonblocking),
+            StreamKind::Unix(s) => s.set_nonblocking(nonblocking),
             #[cfg(any(feature = "rustls-aws", feature = "rustls-ring"))]
-            Stream::Rustls(s) => s.sock.set_nonblocking(nonblocking),
+            StreamKind::Rustls(s) => s.sock.set_nonblocking(nonblocking),
             #[cfg(feature = "native-tls")]
-            Stream::NativeTls(s) => s.get_ref().set_nonblocking(nonblocking),
+            StreamKind::NativeTls(s) => s.get_ref().set_nonblocking(nonblocking),
         }
+    }
+}
+
+impl Read for Stream {
+    /// Reads under the stream's [`StreamRetry`] strategy: a socket
+    /// reporting it is not ready costs an attempt, not the exchange.
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        self.retry(|stream| stream.read_once(buf))
+    }
+}
+
+impl Write for Stream {
+    /// Writes under the stream's [`StreamRetry`] strategy, which is what
+    /// makes the `write_all` built on top of it survive a socket that is
+    /// momentarily full.
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        self.retry(|stream| stream.write_once(buf))
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        self.retry(|stream| stream.flush_once())
     }
 }
 
@@ -498,6 +631,89 @@ mod pinned {
             self.provider
                 .signature_verification_algorithms
                 .supported_schemes()
+        }
+    }
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::*;
+
+    /// A connected socket pair, the near end wrapped as a stream on
+    /// `retry` with a short read deadline, so a socket with nothing to
+    /// hand over says so quickly rather than parking the test.
+    fn paired(retry: StreamRetry) -> (Stream, UnixStream) {
+        let (near, far) = UnixStream::pair().unwrap();
+
+        let stream = Stream {
+            kind: StreamKind::Unix(near),
+            host: String::from("127.0.0.1"),
+            retry,
+        };
+
+        stream
+            .set_read_timeout(Some(Duration::from_millis(5)))
+            .unwrap();
+
+        (stream, far)
+    }
+
+    #[test]
+    fn a_not_ready_read_is_retried_until_the_bytes_arrive() {
+        let (mut stream, mut far) = paired(StreamRetry::Until(Duration::from_secs(5)));
+
+        let peer = thread::spawn(move || {
+            thread::sleep(Duration::from_millis(20));
+            far.write_all(b"* OK server ready\r\n").unwrap();
+        });
+
+        let mut buf = [0u8; 64];
+        let n = stream.read(&mut buf).unwrap();
+        peer.join().unwrap();
+
+        assert_eq!(&buf[..n], b"* OK server ready\r\n");
+    }
+
+    #[test]
+    fn a_read_that_never_becomes_ready_gives_up_with_a_timeout() {
+        let (mut stream, _far) = paired(StreamRetry::Until(Duration::from_millis(50)));
+
+        let mut buf = [0u8; 64];
+        let err = stream.read(&mut buf).unwrap_err();
+
+        assert_eq!(err.kind(), io::ErrorKind::TimedOut);
+        assert_eq!(err.to_string(), "stream stopped responding after 50ms");
+    }
+
+    #[test]
+    fn never_hands_a_not_ready_read_straight_back() {
+        let (mut stream, _far) = paired(StreamRetry::Never);
+
+        let mut buf = [0u8; 64];
+        let err = stream.read(&mut buf).unwrap_err();
+
+        assert_eq!(err.kind(), io::ErrorKind::WouldBlock);
+    }
+
+    #[test]
+    fn a_broken_stream_is_reported_on_the_spot() {
+        let (mut stream, far) = paired(StreamRetry::Until(Duration::from_secs(60)));
+        drop(far);
+
+        let start = Instant::now();
+        let err = stream.write(b"A1 NOOP\r\n").unwrap_err();
+
+        assert_eq!(err.kind(), io::ErrorKind::BrokenPipe);
+        // the budget was a minute: anything close to it means the write
+        // was retried, which a broken pipe never is
+        assert!(start.elapsed() < Duration::from_secs(1));
+    }
+
+    #[test]
+    fn the_default_strategy_retries_for_a_minute() {
+        match StreamRetry::default() {
+            StreamRetry::Until(timeout) => assert_eq!(timeout, DEFAULT_RETRY_TIMEOUT),
+            retry => panic!("expected Until, got {retry:?}"),
         }
     }
 }

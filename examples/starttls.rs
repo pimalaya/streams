@@ -1,7 +1,7 @@
 //! STARTTLS: connect in the clear, exchange the upgrade command with
 //! the server, then swap the plain socket for a TLS session.
 //!
-//! [`StreamStd::upgrade_tls`] consumes the plain stream and returns the
+//! [`Stream::upgrade_tls`] consumes the plain stream and returns the
 //! encrypted one, so a caller cannot keep writing to the socket it just
 //! upgraded. What it does not do is speak the protocol: the `STARTTLS`
 //! command below is SMTP's, and deciding when to send it belongs to the
@@ -17,7 +17,10 @@ use std::{
     io::{Read, Write},
 };
 
-use pimalaya_stream::{std::stream::StreamStd, tls::Tls};
+use pimalaya_stream::{
+    std::stream::{Stream, StreamTcpConnectOptions},
+    tls::Tls,
+};
 
 fn main() -> Result<(), Box<dyn Error>> {
     env_logger::init();
@@ -26,7 +29,8 @@ fn main() -> Result<(), Box<dyn Error>> {
     let port: u16 = env::var("PORT").unwrap_or_else(|_| "587".into()).parse()?;
 
     let tls = Tls::default();
-    let mut stream = StreamStd::connect_tcp(&host, port)?;
+    let opts = StreamTcpConnectOptions::default();
+    let mut stream = Stream::connect_tcp(&host, port, opts)?;
     let mut buf = [0u8; 4096];
 
     // NOTE: greeting, then EHLO, then the upgrade command. A real

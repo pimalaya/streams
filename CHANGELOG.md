@@ -7,6 +7,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Added `std::stream::StreamRetry`, what a stream does when a read or a write reports it is not ready: `Never` hands the failure back untouched, `Until(Duration)` retries until that long passes without progress and then fails with `TimedOut`. Streams open with `StreamRetry::default()`, which is `Until` the new `std::stream::DEFAULT_RETRY_TIMEOUT` of one minute.
+
+  A blocking socket is not supposed to report `EAGAIN`, yet callers do see one surface mid-exchange, macOS especially and the more readily the longer the exchange runs. Every protocol crate above was ending its exchange there, on a stream that was merely not ready yet: himalaya#731 and himalaya#732 are the same bare `Resource temporarily unavailable (os error 35)` reported from an IMAP `SORT` fallback and from a slow `AUTHENTICATE`, and every client arming a read deadline of its own was building the same failure in on purpose. The strategy is the only thing a caller chooses, `Read` and `Write` honoring it without a method of their own to call.
+
+- Added `std::stream::StreamTcpConnectOptions`, `std::stream::StreamTlsConnectOptions` and `std::stream::StreamUnixConnectOptions`, one per transport, each holding what that transport has and nothing more: a proxy where there is one to route through, TLS settings where there is a session to secure, and the retry strategy everywhere. All public fields with a `Default`, the shape the io- protocol crates already use for their own options.
+
+### Changed
+
+- `Read` and `Write` on `Stream` now honor the stream's retry strategy. **Behaviour change.**
+
+  Reads, writes and flushes retry `EAGAIN`, `EINTR` and the Windows spelling of an expired deadline, pausing from one millisecond up to 250 between attempts and logging the raw errno of each at debug level. Each call carries its own budget, so a slow but progressing transfer never runs out, and the `write_all` std builds on `write` inherits the whole thing. Exhausting the budget yields `TimedOut` with a message saying so, in place of the raw errno callers used to surface. A caller that wants the not-ready failures for itself, a watcher polling a shutdown flag between IDLE keep-alives being the usual case, selects `StreamRetry::Never`.
+
+- Opening a stream now arms a socket read deadline matching its retry strategy, one minute by default. **Behaviour change.**
+
+  Without it the budget would not be enforceable: a server that goes silent on an otherwise healthy connection blocks the caller in `read` forever, which is where the deadline turns the silence into a retry the budget can count. A caller arming a shorter one of its own keeps it, and only gets more wakeups.
+
+- `Stream::connect_tcp`, `Stream::connect_tls` and `Stream::connect_unix` take their transport's options struct. **Breaking.**
+
+  `connect_tls(&host, port, &tls)` becomes `connect_tls(&host, port, StreamTlsConnectOptions { tls, ..Default::default() })`, and the proxy that only the builder could set is now a field beside it. A caller with nothing to say passes the default options and gets the ambient proxy and the default strategy.
+
+- `Stream::retry` is a public field, replacing a setter. **Breaking.**
+
+  Assigning `StreamRetry::Never` is how a caller takes the not-ready failures back mid-connection, which is the only such switch the org makes. Assigning a different `StreamRetry::Until` changes the budget alone: the deadline was armed at connect time, so a caller wanting a matching one calls `set_read_timeout` beside it rather than having a setter re-arm the socket behind its back.
+
+- `Stream::set_nonblocking` no longer touches the retry strategy, and takes `&self` again. A caller reaching for non-blocking mode assigns `StreamRetry::Never` beside it, the two settings being contradictory: it wants the `WouldBlock` failures a strategy would spend its whole budget hiding.
+
+- Renamed `StreamStd` to `std::stream::Stream`. **Breaking.**
+
+  The runtime is what the module says, `std::stream` today and a sibling module the day an async one lands, so the type repeated it for nothing. Consumers import `pimalaya_stream::std::stream::Stream`, aliasing it where a `Stream` of their own is already in scope.
+
+### Removed
+
+- Removed `std::stream::StreamBuilder` and `Stream::builder`. **Breaking.**
+
+  Four entry points said the same thing: three constructors, a builder with a setter per field, and two private layers behind both. Chained setters were also a second vocabulary for a job the rest of Pimalaya does with an options struct. Everything the builder could say, the connect options say.
+
 ## [0.2.0] - 2026-08-15
 
 ### Added

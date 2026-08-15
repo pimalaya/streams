@@ -1,7 +1,7 @@
 //! User-facing TLS configuration.
 //!
 //! Consumers construct a [`Tls`] and pass it to a runtime-specific connector
-//! (e.g. [`StreamStd::connect_tls`] / [`StreamStd::upgrade_tls`]); the
+//! (e.g. [`Stream::connect_tls`] / [`Stream::upgrade_tls`]); the
 //! underlying TLS backend types (`rustls`, `native-tls`) never escape this
 //! crate.
 //!
@@ -10,8 +10,8 @@
 //! ship `default_alpn()` helpers so config layers can populate
 //! `rustls.alpn` before calling `connect_tls`.
 //!
-//! [`StreamStd::connect_tls`]: crate::std::stream::StreamStd::connect_tls
-//! [`StreamStd::upgrade_tls`]: crate::std::stream::StreamStd::upgrade_tls
+//! [`Stream::connect_tls`]: crate::std::stream::Stream::connect_tls
+//! [`Stream::upgrade_tls`]: crate::std::stream::Stream::upgrade_tls
 
 use std::path::PathBuf;
 
